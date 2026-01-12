@@ -207,10 +207,15 @@
             }
 
             #timeline-container {
-                order: -1;
                 padding: 10px;
                 border-top: none;
                 border-bottom: 2px solid #444;
+                flex-shrink: 0;
+            }
+            
+            #map {
+                min-height: 0;
+                overflow: hidden;
             }
 
             #timeline-label {
@@ -339,7 +344,7 @@
         </div>
 
         <div id="legend">
-            <h3>Artwork Types</h3>
+            <h3>Legend</h3>
             <div id="legend-content"></div>
         </div>
 

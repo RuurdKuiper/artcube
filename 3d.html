@@ -184,11 +184,12 @@
             }
 
             #legend {
-                bottom: 10px;
+                bottom: 60px;
                 right: 10px;
                 padding: 10px;
                 min-width: 150px;
                 max-width: 45%;
+                z-index: 200;
             }
 
             #legend h3 {
@@ -454,6 +455,8 @@
             // Mouse move for tooltip
             renderer.domElement.addEventListener('mousemove', onMouseMove);
             renderer.domElement.addEventListener('click', onMouseClick);
+            // Touch events for mobile
+            renderer.domElement.addEventListener('touchend', onMouseClick);
 
             // Window resize
             window.addEventListener('resize', onWindowResize);
@@ -1008,8 +1011,25 @@
         }
 
         function onMouseClick(event) {
-            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            // Prevent default to avoid scrolling/zooming on mobile
+            event.preventDefault();
+            event.stopPropagation();
+            
+            // Handle both mouse and touch events
+            let clientX, clientY;
+            if (event.touches && event.touches.length > 0) {
+                clientX = event.touches[0].clientX;
+                clientY = event.touches[0].clientY;
+            } else if (event.changedTouches && event.changedTouches.length > 0) {
+                clientX = event.changedTouches[0].clientX;
+                clientY = event.changedTouches[0].clientY;
+            } else {
+                clientX = event.clientX;
+                clientY = event.clientY;
+            }
+            
+            mouse.x = (clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(clientY / window.innerHeight) * 2 + 1;
 
             raycaster.setFromCamera(mouse, camera);
             const intersects = raycaster.intersectObjects(points);
