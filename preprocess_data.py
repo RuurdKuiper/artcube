@@ -457,25 +457,29 @@ def generate_standalone_html(html_template_file: str, data: dict, output_html_fi
     # Escape for embedding in HTML/JavaScript
     data_json_escaped = data_json.replace('</script>', '<\\/script>')
     
-    # Replace the fetch call with embedded data
-    # Look for the specific pattern and replace it
-    old_code = """            // Load data
-            const response = await fetch('artwork_data_processed.json');
-            const data = await response.json();"""
-    
     new_code = f"""            // Load data - embedded directly to avoid CORS issues
             const data = {data_json_escaped};"""
     
-    if old_code in html_content:
-        html_content = html_content.replace(old_code, new_code)
+    # Replace existing embedded data or fetch call with new embedded data
+    import re
+    # Pattern 1: Existing embedded data (look for "const data = {" followed by any content until ";")
+    pattern1 = r'// Load data - embedded directly to avoid CORS issues\s*const data = \{.*?\};'
+    if re.search(pattern1, html_content, re.DOTALL):
+        html_content = re.sub(pattern1, new_code, html_content, flags=re.DOTALL)
     else:
-        # Try alternative pattern
-        import re
-        html_content = re.sub(
-            r"const response = await fetch\('artwork_data_processed\.json'\);\s*const data = await response\.json\(\);",
-            f"const data = {data_json_escaped};",
-            html_content
-        )
+        # Pattern 2: Fetch call pattern
+        old_code = """            // Load data
+            const response = await fetch('artwork_data_processed.json');
+            const data = await response.json();"""
+        if old_code in html_content:
+            html_content = html_content.replace(old_code, new_code)
+        else:
+            # Pattern 3: Alternative fetch pattern
+            html_content = re.sub(
+                r"const response = await fetch\('artwork_data_processed\.json'\);\s*const data = await response\.json\(\);",
+                new_code,
+                html_content
+            )
     
     # Save the standalone HTML
     with open(output_html_file, 'w', encoding='utf-8') as f:
@@ -498,21 +502,26 @@ def generate_map_standalone_html(html_template_file: str, data: dict, output_htm
     new_code = f"""            // Load data - embedded directly to avoid CORS issues
             const data = {data_json_escaped};"""
     
-    # Replace the fetch call with embedded data
-    old_code = """            // Load data
+    # Replace existing embedded data or fetch call with new embedded data
+    import re
+    # Pattern 1: Existing embedded data (look for "const data = {" followed by any content until ";")
+    pattern1 = r'// Load data - embedded directly to avoid CORS issues\s*const data = \{.*?\};'
+    if re.search(pattern1, html_content, re.DOTALL):
+        html_content = re.sub(pattern1, new_code, html_content, flags=re.DOTALL)
+    else:
+        # Pattern 2: Fetch call pattern
+        old_code = """            // Load data
             const response = await fetch('artwork_data_processed.json');
             const data = await response.json();"""
-    
-    if old_code in html_content:
-        html_content = html_content.replace(old_code, new_code)
-    else:
-        # Try alternative pattern
-        import re
-        html_content = re.sub(
-            r"const response = await fetch\('artwork_data_processed\.json'\);\s*const data = await response\.json\(\);",
-            new_code,
-            html_content
-        )
+        if old_code in html_content:
+            html_content = html_content.replace(old_code, new_code)
+        else:
+            # Pattern 3: Alternative fetch pattern
+            html_content = re.sub(
+                r"const response = await fetch\('artwork_data_processed\.json'\);\s*const data = await response\.json\(\);",
+                new_code,
+                html_content
+            )
     
     # Save the standalone HTML
     with open(output_html_file, 'w', encoding='utf-8') as f:
@@ -537,5 +546,5 @@ if __name__ == '__main__':
     # But for now, we always start from dataset_AI.json and merge coordinates
     
     data = preprocess_data(input_file, 'artwork_data_processed.json', geocode=geocode, geocoded_file=geocoded_file)
-    generate_standalone_html('artwork_3d_visualization.html', data, '3d.html')
-    generate_map_standalone_html('artwork_map_visualization.html', data, 'index.html')
+    generate_standalone_html('3d.html', data, '3d.html')
+    generate_map_standalone_html('index.html', data, 'index.html')
