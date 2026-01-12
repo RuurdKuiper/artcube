@@ -849,14 +849,20 @@
                     });
 
                     // Add click handler (works for both desktop and mobile)
-                    const handleMarkerClick = function(e) {
+                    marker.on('click', function(e) {
+                        // Stop event propagation to prevent map click handler from firing
+                        if (e.originalEvent) {
+                            e.originalEvent.stopPropagation();
+                        }
+                        
                         const isMobile = window.innerWidth <= 768 || 'ontouchstart' in window;
                         
                         if (isMobile) {
                             markerWasClicked = true; // Set flag to indicate marker was clicked
                             
                             // Mobile behavior: first click shows tooltip, second click opens Wikipedia
-                            if (lastClickedMarker === marker && document.getElementById('tooltip').style.display === 'block') {
+                            const tooltip = document.getElementById('tooltip');
+                            if (lastClickedMarker === marker && tooltip.style.display === 'block') {
                                 // Second click on same marker - open Wikipedia
                                 if (artwork.wikipedia_url) {
                                     window.open(artwork.wikipedia_url, '_blank');
@@ -866,13 +872,13 @@
                             } else {
                                 // First click (or click on different marker) - show tooltip
                                 lastClickedMarker = marker;
-                                // Get click position for tooltip placement (won't be used on mobile, but required)
-                                const containerPoint = e.containerPoint || (e.latlng ? map.latLngToContainerPoint(e.latlng) : e);
-                                const syntheticEvent = {
-                                    clientX: containerPoint.x,
-                                    clientY: containerPoint.y
+                                // For mobile, we don't need the actual event coordinates since positioning is fixed
+                                // Create a dummy event object just to satisfy the function signature
+                                const dummyEvent = {
+                                    clientX: 0,
+                                    clientY: 0
                                 };
-                                showTooltip(artwork, syntheticEvent);
+                                showTooltip(artwork, dummyEvent);
                             }
                         } else {
                             // Desktop behavior: click opens Wikipedia directly
@@ -880,16 +886,6 @@
                                 window.open(artwork.wikipedia_url, '_blank');
                             }
                         }
-                    };
-                    
-                    marker.on('click', handleMarkerClick);
-                    // Also add touchend for mobile devices that might not fire click events properly
-                    marker.on('touchend', function(e) {
-                        // Prevent default to avoid double-firing
-                        if (e.originalEvent) {
-                            e.originalEvent.preventDefault();
-                        }
-                        handleMarkerClick(e);
                     });
 
                     // Store artwork data and original coordinates in marker
