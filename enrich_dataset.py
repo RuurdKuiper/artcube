@@ -197,15 +197,16 @@ class WikipediaArtEnricher:
         return data
     
     def get_image_url(self, title: str) -> Optional[str]:
-        """Get the main image URL for a Wikipedia article."""
+        """Get the main image URL for a Wikipedia article using multiple methods."""
         try:
-            # Try to get original image URL via API
             api_url = "https://en.wikipedia.org/w/api.php"
+            
+            # Method 1: Try to get original image URL via pageimages API
             params = {
                 'action': 'query',
                 'prop': 'pageimages',
                 'titles': title,
-                'piprop': 'original',
+                'piprop': 'original|thumbnail',
                 'pithumbsize': 2000,
                 'format': 'json'
             }
@@ -215,29 +216,109 @@ class WikipediaArtEnricher:
                 pages = data.get('query', {}).get('pages', {})
                 if pages:
                     page_data = list(pages.values())[0]
+                    
+                    # Try original first
                     if 'original' in page_data:
                         original = page_data['original']
                         if isinstance(original, dict) and 'source' in original:
                             return original['source']
                         elif isinstance(original, str):
                             return original
+                    
+                    # Try thumbnail and convert to original
+                    if 'thumbnail' in page_data:
+                        thumbnail = page_data['thumbnail']
+                        if isinstance(thumbnail, dict) and 'source' in thumbnail:
+                            thumbnail_url = thumbnail['source']
+                            # Convert thumbnail URL to original
+                            original_url = self._thumbnail_to_original(thumbnail_url)
+                            if original_url:
+                                return original_url
             
-            # Alternative: try from page summary thumbnail
+            # Method 2: Try from page summary thumbnail
             summary = self.get_page_summary(title)
             if summary and 'thumbnail' in summary:
-                # Extract thumbnail URL and try to get full size
                 thumbnail_url = summary['thumbnail']['source']
-                # Try to get larger version
-                if 'thumb' in thumbnail_url:
-                    # Replace thumbnail path to get original
-                    original_url = thumbnail_url.split('/thumb/')[1].rsplit('/', 1)[0] if '/thumb/' in thumbnail_url else None
-                    if original_url:
-                        return f"https://upload.wikimedia.org/wikipedia/commons/{original_url}"
+                original_url = self._thumbnail_to_original(thumbnail_url)
+                if original_url:
+                    return original_url
+            
+            # Method 3: Try parsing HTML for infobox image
+            try:
+                page_url = f"{self.WIKIPEDIA_PAGE_URL}/{quote(title)}"
+                html_response = self.session.get(page_url, timeout=10)
+                if html_response.status_code == 200:
+                    html_content = html_response.text
+                    # Look for infobox image
+                    # Pattern: <img src="..." in infobox
+                    infobox_pattern = r'<table[^>]*class="[^"]*infobox[^"]*"[^>]*>.*?<img[^>]*src="([^"]+)"'
+                    match = re.search(infobox_pattern, html_content, re.DOTALL | re.IGNORECASE)
+                    if match:
+                        img_src = match.group(1)
+                        # Convert to full URL if relative
+                        if img_src.startswith('//'):
+                            img_src = 'https:' + img_src
+                        elif img_src.startswith('/'):
+                            img_src = 'https://en.wikipedia.org' + img_src
+                        # Convert thumbnail to original
+                        original_url = self._thumbnail_to_original(img_src)
+                        if original_url:
+                            return original_url
+            except Exception as e:
+                pass  # Silently fail HTML parsing
             
             return None
         except Exception as e:
             print(f"  Error getting image URL: {e}")
             return None
+    
+    def _thumbnail_to_original(self, thumbnail_url: str) -> Optional[str]:
+        """Convert a Wikipedia thumbnail URL to the original image URL."""
+        if not thumbnail_url:
+            return None
+        
+        # Handle different thumbnail URL formats
+        # Format 1: /thumb/path/to/image.jpg/300px-image.jpg
+        if '/thumb/' in thumbnail_url:
+            # Extract the original path
+            parts = thumbnail_url.split('/thumb/')
+            if len(parts) == 2:
+                original_path = parts[1].rsplit('/', 1)[0]  # Remove the thumbnail filename
+                # Determine base URL and namespace
+                if 'upload.wikimedia.org' in thumbnail_url:
+                    # Check which namespace (commons or en)
+                    if '/commons/thumb/' in thumbnail_url:
+                        return f"https://upload.wikimedia.org/wikipedia/commons/{original_path}"
+                    elif '/en/thumb/' in thumbnail_url:
+                        return f"https://upload.wikimedia.org/wikipedia/en/{original_path}"
+                    else:
+                        # Default to commons if namespace not clear
+                        return f"https://upload.wikimedia.org/wikipedia/commons/{original_path}"
+                elif 'wikipedia.org' in thumbnail_url:
+                    # Extract namespace from URL
+                    if '/commons/thumb/' in thumbnail_url:
+                        return f"https://upload.wikimedia.org/wikipedia/commons/{original_path}"
+                    elif '/en/thumb/' in thumbnail_url:
+                        return f"https://upload.wikimedia.org/wikipedia/en/{original_path}"
+        
+        # Format 2: Already an original URL (no /thumb/ in path)
+        if 'upload.wikimedia.org' in thumbnail_url and '/thumb/' not in thumbnail_url:
+            return thumbnail_url
+        
+        # Format 3: Try to construct from thumbnail
+        # If it's a thumbnail, try to get the original
+        if 'thumb' in thumbnail_url.lower() and 'px-' in thumbnail_url:
+            # Remove the thumbnail size part
+            original = re.sub(r'/\d+px-[^/]+$', '', thumbnail_url)
+            original = original.replace('/thumb/', '/')
+            # Preserve namespace (commons or en) in the path
+            if '/commons/' in thumbnail_url and '/commons/' not in original:
+                original = original.replace('/wikipedia/', '/wikipedia/commons/')
+            elif '/en/' in thumbnail_url and '/en/' not in original and '/commons/' not in original:
+                original = original.replace('/wikipedia/', '/wikipedia/en/')
+            return original
+        
+        return None
     
     def download_image(self, image_url: str, filename: str) -> bool:
         """Download an image from URL to filename."""
@@ -301,41 +382,58 @@ class WikipediaArtEnricher:
                 pass
         
         # Get and download image
-        image_url = self.get_image_url(wiki_title)
-        if image_url:
-            print(f"  Found image: {image_url[:80]}...")
-            # Create sanitized filename
-            sanitized_artist = self.sanitize_filename(artist)
-            sanitized_title = self.sanitize_filename(title)
-            base_filename = f"{sanitized_artist}_{sanitized_title}"
-            
-            # Determine file extension from URL
-            extension = '.jpg'  # default
-            if '.png' in image_url.lower():
-                extension = '.png'
-            elif '.svg' in image_url.lower():
-                extension = '.svg'
-            elif '.webp' in image_url.lower():
-                extension = '.webp'
-            elif '.gif' in image_url.lower():
-                extension = '.gif'
-            
-            image_filename = f"{base_filename}{extension}"
-            image_path = os.path.join(self.images_dir, image_filename)
-            
-            # Check if image is already downloaded
-            if os.path.exists(image_path):
-                print(f"  Image already exists: {image_filename}")
-            else:
-                if self.download_image(image_url, image_filename):
-                    print(f"  ✓ Downloaded image: {image_filename}")
+        # First check if we already have an image for this artwork
+        sanitized_artist = self.sanitize_filename(artist)
+        sanitized_title = self.sanitize_filename(title)
+        base_filename = f"{sanitized_artist}_{sanitized_title}"
+        
+        # Check for existing images with various extensions
+        existing_image = None
+        for ext in ['.jpg', '.jpeg', '.png', '.svg', '.webp', '.gif']:
+            potential_filename = f"{base_filename}{ext}"
+            potential_path = os.path.join(self.images_dir, potential_filename)
+            if os.path.exists(potential_path):
+                existing_image = potential_filename
+                print(f"  Image already exists: {existing_image}")
+                enriched['image_filename'] = f"images/{existing_image}"
+                break
+        
+        # Only fetch and download if we don't have the image
+        if not existing_image:
+            image_url = self.get_image_url(wiki_title)
+            if image_url:
+                print(f"  Found image: {image_url[:80]}...")
+                
+                # Determine file extension from URL
+                extension = '.jpg'  # default
+                if '.png' in image_url.lower():
+                    extension = '.png'
+                elif '.svg' in image_url.lower():
+                    extension = '.svg'
+                elif '.webp' in image_url.lower():
+                    extension = '.webp'
+                elif '.gif' in image_url.lower():
+                    extension = '.gif'
+                elif '.jpeg' in image_url.lower():
+                    extension = '.jpeg'
+                
+                image_filename = f"{base_filename}{extension}"
+                image_path = os.path.join(self.images_dir, image_filename)
+                
+                # Double-check if image exists (in case extension changed)
+                if os.path.exists(image_path):
+                    print(f"  Image already exists: {image_filename}")
+                    enriched['image_filename'] = f"images/{image_filename}"
                 else:
-                    print(f"  ⚠️  Failed to download image")
-                    image_filename = None
-            
-            enriched['image_filename'] = f"images/{image_filename}" if image_filename else None
-        else:
-            print(f"  ⚠️  No image found")
+                    if self.download_image(image_url, image_filename):
+                        print(f"  ✓ Downloaded image: {image_filename}")
+                        enriched['image_filename'] = f"images/{image_filename}"
+                    else:
+                        print(f"  ⚠️  Failed to download image")
+                        enriched['image_filename'] = None
+            else:
+                print(f"  ⚠️  No image found")
+                enriched['image_filename'] = None
         
         # Small delay to be respectful to Wikipedia API
         time.sleep(0.5)

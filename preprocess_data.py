@@ -8,8 +8,17 @@ import json
 import re
 import time
 from typing import Dict, List, Tuple, Optional
-from geopy.geocoders import Nominatim
-from geopy.exc import GeocoderTimedOut, GeocoderServiceError
+
+# Optional geopy imports (only needed for geocoding)
+try:
+    from geopy.geocoders import Nominatim
+    from geopy.exc import GeocoderTimedOut, GeocoderServiceError
+    GEOPY_AVAILABLE = True
+except ImportError:
+    GEOPY_AVAILABLE = False
+    Nominatim = None
+    GeocoderTimedOut = Exception
+    GeocoderServiceError = Exception
 
 def parse_year(year_str: str) -> Tuple[float, str]:
     """
@@ -181,18 +190,83 @@ def compress_bce_year(year_value: float, min_bce: float, max_ce: float) -> float
         normalized = 0.1 + ((year_value / ce_range) * 0.9)
         return normalized
 
-def preprocess_data(input_file: str, output_file: str, geocode: bool = True):
+def load_geocoded_data(geocoded_file: str) -> Dict:
+    """Load geocoded data if it exists, return empty dict if not."""
+    try:
+        with open(geocoded_file, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        print(f"Warning: Could not load geocoded file {geocoded_file}: {e}")
+        return {}
+
+def get_coordinates_from_geocoded(artwork: Dict, geocoded_data: Dict) -> Optional[Dict]:
+    """Get coordinates for an artwork from geocoded data if available.
+    Uses flexible matching: matches by title first, then prefers matching creation_location.
+    """
+    title = artwork.get('title', '').strip()
+    creation_location = artwork.get('creation_location', '').strip() if artwork.get('creation_location') else ''
+    
+    # First, try exact match (title + creation_location)
+    for period, items in geocoded_data.items():
+        for item in items:
+            item_title = item.get('title', '').strip()
+            item_location = item.get('creation_location', '').strip() if item.get('creation_location') else ''
+            
+            if (item_title == title and 
+                item_location == creation_location and
+                'coordinates' in item and item['coordinates']):
+                return item['coordinates']
+    
+    # If no exact match, try matching by title only (if creation_location matches partially or is empty)
+    matches_by_title = []
+    for period, items in geocoded_data.items():
+        for item in items:
+            item_title = item.get('title', '').strip()
+            item_location = item.get('creation_location', '').strip() if item.get('creation_location') else ''
+            
+            if item_title == title and 'coordinates' in item and item['coordinates']:
+                # Check if locations match (case-insensitive, allow partial matches)
+                location_match = False
+                if not creation_location or not item_location:
+                    location_match = True  # If either is empty, consider it a match
+                elif creation_location.lower() == item_location.lower():
+                    location_match = True
+                elif creation_location.lower() in item_location.lower() or item_location.lower() in creation_location.lower():
+                    location_match = True  # Partial match
+                
+                if location_match:
+                    matches_by_title.append(item['coordinates'])
+    
+    # Return first match if any found
+    if matches_by_title:
+        return matches_by_title[0]
+    
+    return None
+
+def save_geocoded_data(data: Dict, geocoded_file: str):
+    """Save data with coordinates to geocoded file."""
+    with open(geocoded_file, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    print(f"Saved geocoded data to {geocoded_file}")
+
+def preprocess_data(input_file: str, output_file: str, geocode: bool = True, geocoded_file: str = 'dataset_AI_geocoded.json'):
     """Preprocess artwork data for visualization.
     
     Args:
         input_file: Path to input JSON file
         output_file: Path to output JSON file
         geocode: If True, geocode locations to get coordinates
+        geocoded_file: Path to geocoded cache file
     """
     
-    # Load data
+    # Load source data
     with open(input_file, 'r', encoding='utf-8') as f:
         data = json.load(f)
+    
+    # Always load existing geocoded data if available (even when not geocoding)
+    geocoded_data = load_geocoded_data(geocoded_file)
     
     # Flatten data structure (extract all artworks from all periods)
     artworks = []
@@ -200,15 +274,68 @@ def preprocess_data(input_file: str, output_file: str, geocode: bool = True):
         for item in items:
             artworks.append(item)
     
-    print(f"Loaded {len(artworks)} artworks")
+    print(f"Loaded {len(artworks)} artworks from {input_file}")
+    
+    # Always try to load coordinates from geocoded data
+    geocoded_count = 0
+    for artwork in artworks:
+        coords = get_coordinates_from_geocoded(artwork, geocoded_data)
+        if coords:
+            artwork['coordinates'] = coords
+            geocoded_count += 1
+    
+    print(f"Loaded {geocoded_count} artworks with existing coordinates from cache")
     
     # Initialize geocoder and cache if geocoding is enabled
     geolocator = None
     geocode_cache = {}
+    needs_geocoding = []
+    
     if geocode:
-        print("Initializing geocoder...")
-        geolocator = Nominatim(user_agent="artwork_visualization")
-        print("Geocoding locations (this may take a while due to rate limiting)...")
+        if not GEOPY_AVAILABLE:
+            print("Error: geopy is required for geocoding. Install it with: pip install geopy")
+            return
+        # Find artworks that still need geocoding (those without coordinates)
+        for artwork in artworks:
+            if not artwork.get('coordinates'):
+                needs_geocoding.append(artwork)
+        
+        print(f"Need to geocode {len(needs_geocoding)} artworks")
+        
+        if needs_geocoding:
+            print("Initializing geocoder...")
+            geolocator = Nominatim(user_agent="artwork_visualization")
+            print("Geocoding locations (this may take a while due to rate limiting)...")
+    
+    # Geocode artworks that need it
+    if geocode and needs_geocoding and geolocator:
+        for i, artwork in enumerate(needs_geocoding):
+            creation_location = artwork.get('creation_location', '')
+            if creation_location:
+                coordinates = geocode_location(creation_location, geolocator, geocode_cache)
+                artwork['coordinates'] = coordinates
+                print(f"  [{i+1}/{len(needs_geocoding)}] {artwork.get('title', 'Unknown')}: {coordinates if coordinates else 'Failed'}")
+        
+        # Save geocoded data back to file
+        # Reconstruct the period structure with coordinates, preserving all original data
+        geocoded_output = {}
+        for period, items in data.items():
+            geocoded_output[period] = []
+            for item in items:
+                # Find matching artwork in our updated list to get coordinates
+                item_with_coords = item.copy()  # Preserve all original data
+                for artwork in artworks:
+                    if (artwork.get('title') == item.get('title') and 
+                        artwork.get('creation_location') == item.get('creation_location')):
+                        # Add coordinates if they exist
+                        if 'coordinates' in artwork:
+                            item_with_coords['coordinates'] = artwork['coordinates']
+                        break
+                geocoded_output[period].append(item_with_coords)
+        
+        save_geocoded_data(geocoded_output, geocoded_file)
+        total_with_coords = sum(1 for period in geocoded_output.values() for item in period if item.get('coordinates'))
+        print(f"Geocoding complete. Saved {total_with_coords} artworks with coordinates to {geocoded_file}.")
     
     # Parse years and collect unique types and regions
     parsed_years = []
@@ -263,15 +390,6 @@ def preprocess_data(input_file: str, output_file: str, geocode: bool = True):
         type_index = type_to_index.get(art_type, 0)
         region_index = region_to_index.get(region, 0)
         
-        # Geocode creation location if enabled
-        coordinates = None
-        if geocode and geolocator:
-            creation_location = artwork.get('creation_location', '')
-            if creation_location:
-                coordinates = geocode_location(creation_location, geolocator, geocode_cache)
-                if coordinates:
-                    print(f"  Geocoded: {artwork.get('title', 'Unknown')} -> {coordinates}")
-        
         # Create processed artwork entry
         processed = {
             'title': artwork.get('title', 'Unknown'),
@@ -294,7 +412,7 @@ def preprocess_data(input_file: str, output_file: str, geocode: bool = True):
             'image_filename': artwork.get('image_filename', ''),
             'description': artwork.get('description', ''),
             'creation_location': artwork.get('creation_location', ''),
-            'coordinates': coordinates
+            'coordinates': artwork.get('coordinates')  # Get from artwork (may have been loaded from geocoded file or geocoded above)
         }
         
         processed_artworks.append(processed)
@@ -371,18 +489,19 @@ def generate_map_standalone_html(html_template_file: str, data: dict, output_htm
     with open(html_template_file, 'r', encoding='utf-8') as f:
         html_content = f.read()
     
-    # Convert data to JSON string and escape for JavaScript
+    # Convert data to JSON string
     data_json = json.dumps(data, ensure_ascii=False)
-    # Escape for embedding in HTML/JavaScript
+    # Escape for embedding in HTML/JavaScript - only need to escape </script>
     data_json_escaped = data_json.replace('</script>', '<\\/script>')
+    
+    # Embed directly as JavaScript object (JSON is valid JavaScript)
+    new_code = f"""            // Load data - embedded directly to avoid CORS issues
+            const data = {data_json_escaped};"""
     
     # Replace the fetch call with embedded data
     old_code = """            // Load data
             const response = await fetch('artwork_data_processed.json');
             const data = await response.json();"""
-    
-    new_code = f"""            // Load data - embedded directly to avoid CORS issues
-            const data = {data_json_escaped};"""
     
     if old_code in html_content:
         html_content = html_content.replace(old_code, new_code)
@@ -391,7 +510,7 @@ def generate_map_standalone_html(html_template_file: str, data: dict, output_htm
         import re
         html_content = re.sub(
             r"const response = await fetch\('artwork_data_processed\.json'\);\s*const data = await response\.json\(\);",
-            f"const data = {data_json_escaped};",
+            new_code,
             html_content
         )
     
@@ -410,6 +529,13 @@ if __name__ == '__main__':
         geocode = False
         print("Skipping geocoding (using --no-geocode flag)")
     
-    data = preprocess_data('dataset_AI.json', 'artwork_data_processed.json', geocode=geocode)
+    # Use geocoded file if it exists and we're geocoding, otherwise use original
+    geocoded_file = 'dataset_AI_geocoded.json'
+    input_file = 'dataset_AI.json'
+    
+    # If geocoded file exists and is complete, we could use it directly
+    # But for now, we always start from dataset_AI.json and merge coordinates
+    
+    data = preprocess_data(input_file, 'artwork_data_processed.json', geocode=geocode, geocoded_file=geocoded_file)
     generate_standalone_html('artwork_3d_visualization.html', data, 'artwork_3d_visualization_standalone.html')
     generate_map_standalone_html('artwork_map_visualization.html', data, 'artwork_map_visualization_standalone.html')
