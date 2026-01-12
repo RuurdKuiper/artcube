@@ -240,7 +240,8 @@
             }
 
             #tooltip-image {
-                max-width: 120px;
+                max-width: 100px;
+                max-height: 100px;
             }
 
             #tooltip-title {
@@ -364,6 +365,7 @@
         let markersLayer;
         let currentYearRange = { min: -38000, max: 2003 };
         let typeColors = {};
+        let lastClickedMarker = null; // Track last clicked marker for mobile double-click behavior
 
         // Color palette for artwork types
         const TYPE_COLORS = {
@@ -809,23 +811,57 @@
                         }
                     );
 
-                    // Add hover tooltip
+                    // Add hover tooltip (desktop only)
                     marker.on('mouseover', function(e) {
-                        showTooltip(artwork, e.originalEvent);
+                        // Only show hover on desktop (non-touch devices)
+                        if (window.innerWidth > 768 && !('ontouchstart' in window)) {
+                            showTooltip(artwork, e.originalEvent);
+                        }
                     });
 
                     marker.on('mouseout', function() {
-                        hideTooltip();
+                        // Only hide hover on desktop
+                        if (window.innerWidth > 768 && !('ontouchstart' in window)) {
+                            hideTooltip();
+                        }
                     });
 
                     marker.on('mousemove', function(e) {
-                        updateTooltipPosition(e.originalEvent);
+                        // Only update position on desktop
+                        if (window.innerWidth > 768 && !('ontouchstart' in window)) {
+                            updateTooltipPosition(e.originalEvent);
+                        }
                     });
 
-                    // Add click handler to open Wikipedia
-                    marker.on('click', function() {
-                        if (artwork.wikipedia_url) {
-                            window.open(artwork.wikipedia_url, '_blank');
+                    // Add click handler
+                    marker.on('click', function(e) {
+                        const isMobile = window.innerWidth <= 768 || 'ontouchstart' in window;
+                        
+                        if (isMobile) {
+                            // Mobile behavior: first click shows tooltip, second click opens Wikipedia
+                            if (lastClickedMarker === marker && document.getElementById('tooltip').style.display === 'block') {
+                                // Second click on same marker - open Wikipedia
+                                if (artwork.wikipedia_url) {
+                                    window.open(artwork.wikipedia_url, '_blank');
+                                }
+                                lastClickedMarker = null;
+                                hideTooltip();
+                            } else {
+                                // First click (or click on different marker) - show tooltip
+                                lastClickedMarker = marker;
+                                // Get click position for tooltip placement
+                                const containerPoint = e.containerPoint || map.latLngToContainerPoint(e.latlng);
+                                const syntheticEvent = {
+                                    clientX: containerPoint.x,
+                                    clientY: containerPoint.y
+                                };
+                                showTooltip(artwork, syntheticEvent);
+                            }
+                        } else {
+                            // Desktop behavior: click opens Wikipedia directly
+                            if (artwork.wikipedia_url) {
+                                window.open(artwork.wikipedia_url, '_blank');
+                            }
                         }
                     });
 

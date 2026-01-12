@@ -208,8 +208,8 @@
             }
 
             #tooltip-image {
-                max-width: 200px;
-                max-height: 200px;
+                max-width: 150px;
+                max-height: 150px;
             }
 
             #tooltip-title {
@@ -374,6 +374,7 @@
         let currentAxes = { x: 'type', y: 'region', z: 'year' };
         let hoveredPoint = null;
         let isWhiteBackground = false;
+        let lastClickedPoint = null; // Track last clicked point for mobile double-click behavior
 
         // Initialize
         async function init() {
@@ -984,8 +985,9 @@
 
             // Position tooltip to the right of the point with small offset
             tooltip.style.display = 'block';
-            const tooltipWidth = 400;
-            const tooltipHeight = 500;
+            const isMobile = window.innerWidth <= 768 || 'ontouchstart' in window;
+            const tooltipWidth = isMobile ? 250 : 400;
+            const tooltipHeight = isMobile ? 350 : 500;
             const offset = 30; // Small offset from point
             let left = x + offset;
             let top = y;
@@ -1013,9 +1015,32 @@
             const intersects = raycaster.intersectObjects(points);
 
             if (intersects.length > 0) {
-                const artwork = intersects[0].object.userData.artwork;
-                if (artwork.wikipedia_url) {
-                    window.open(artwork.wikipedia_url, '_blank');
+                const point = intersects[0].object;
+                const artwork = point.userData.artwork;
+                const isMobile = window.innerWidth <= 768 || 'ontouchstart' in window;
+                
+                if (isMobile) {
+                    // Mobile behavior: first click shows tooltip, second click opens Wikipedia
+                    const tooltip = document.getElementById('tooltip');
+                    if (lastClickedPoint === point && tooltip.style.display === 'block') {
+                        // Second click on same point - open Wikipedia
+                        if (artwork.wikipedia_url) {
+                            window.open(artwork.wikipedia_url, '_blank');
+                        }
+                        lastClickedPoint = null;
+                        tooltip.style.display = 'none';
+                        hoveredPoint = null;
+                    } else {
+                        // First click (or click on different point) - show tooltip
+                        lastClickedPoint = point;
+                        const point3D = point.position.clone();
+                        showTooltip(artwork, point3D);
+                    }
+                } else {
+                    // Desktop behavior: click opens Wikipedia directly
+                    if (artwork.wikipedia_url) {
+                        window.open(artwork.wikipedia_url, '_blank');
+                    }
                 }
             }
         }
