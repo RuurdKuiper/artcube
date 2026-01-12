@@ -377,10 +377,14 @@
         // Color palette for artwork types
         const TYPE_COLORS = {
             'architecture': '#FF6B6B',
+            'ceramic': '#FFA07A',
             'drawing': '#4ECDC4',
             'installation': '#95E1D3',
+            'mosaic': '#FFD700',
             'other': '#F38181',
             'painting': '#AA96DA',
+            'photography': '#9370DB',
+            'print': '#20B2AA',
             'sculpture': '#FCBAD3',
             'textile': '#FFD93D'
         };
@@ -848,11 +852,15 @@
                         }
                     });
 
-                    // Add click handler (works for both desktop and mobile)
-                    marker.on('click', function(e) {
-                        // Stop event propagation to prevent map click handler from firing
+                    // Click handler function (shared for click and touch events)
+                    const handleMarkerInteraction = function(e) {
+                        // Prevent event propagation to map click handler
                         if (e.originalEvent) {
                             e.originalEvent.stopPropagation();
+                        }
+                        // Also prevent default to avoid double-firing
+                        if (e.originalEvent && e.originalEvent.cancelable) {
+                            e.originalEvent.preventDefault();
                         }
                         
                         const isMobile = window.innerWidth <= 768 || 'ontouchstart' in window;
@@ -886,6 +894,13 @@
                                 window.open(artwork.wikipedia_url, '_blank');
                             }
                         }
+                    };
+                    
+                    // Add click handler (works for desktop and mobile)
+                    marker.on('click', handleMarkerInteraction);
+                    // Also add touchstart/touchend handlers for better mobile support
+                    marker.on('touchend', function(e) {
+                        handleMarkerInteraction(e);
                     });
 
                     // Store artwork data and original coordinates in marker

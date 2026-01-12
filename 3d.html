@@ -563,11 +563,16 @@
             // Offset from origin to avoid label overlap
             const originOffset = 1.5;
 
-            // Create points
+            // Create points and calculate center
+            let centerX = 0, centerY = 0, centerZ = 0;
             artworks.forEach((artwork, index) => {
                 const x = originOffset + getAxisValue(artwork, currentAxes.x) * scale;
                 const y = originOffset + getAxisValue(artwork, currentAxes.y) * scale;
                 const z = originOffset + getAxisValue(artwork, currentAxes.z) * scale;
+
+                centerX += x;
+                centerY += y;
+                centerZ += z;
 
                 // Create sphere geometry
                 const geometry = new THREE.SphereGeometry(0.15, 16, 16);
@@ -583,6 +588,17 @@
                 scene.add(sphere);
                 points.push(sphere);
             });
+
+            // Calculate center of all points
+            if (artworks.length > 0) {
+                centerX /= artworks.length;
+                centerY /= artworks.length;
+                centerZ /= artworks.length;
+                
+                // Set OrbitControls target to center (this controls where camera looks)
+                controls.target.set(centerX, centerY, centerZ);
+                controls.update();
+            }
 
             // Add axes helpers
             addAxesHelpers(scale);
