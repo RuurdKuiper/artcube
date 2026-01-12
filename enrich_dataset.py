@@ -252,7 +252,7 @@ class WikipediaArtEnricher:
                     
                     # Look for infobox image
                     # Pattern: <img src="..." in infobox
-                    infobox_pattern = r'<table[^>]*class="[^"]*infobox[^"]*"[^>]*>.*?<img[^>]*src="([^"]+)"'
+                    infobox_pattern = r'<table[^>]*class="[^"]*infobox[^"]*"[^>]*>.*?<img[^>]*(?:src|data-src)="([^"]+)"'
                     match = re.search(infobox_pattern, html_content, re.DOTALL | re.IGNORECASE)
                     if match:
                         img_src = match.group(1)
@@ -266,18 +266,88 @@ class WikipediaArtEnricher:
                         if original_url:
                             return original_url
                     
+                    # Also look for images in the main content area (not just infobox)
+                    # Many artwork pages have the main image in the content, not infobox
+                    content_img_pattern = r'<div[^>]*class="[^"]*mw-parser-output[^"]*"[^>]*>.*?<img[^>]*(?:src|data-src)="([^"]+)"'
+                    content_match = re.search(content_img_pattern, html_content, re.DOTALL | re.IGNORECASE)
+                    if content_match:
+                        img_src = content_match.group(1)
+                        if img_src.startswith('//'):
+                            img_src = 'https:' + img_src
+                        elif img_src.startswith('/'):
+                            img_src = 'https://en.wikipedia.org' + img_src
+                        # Check if it's a Wikimedia URL
+                        if 'upload.wikimedia.org' in img_src:
+                            original_url = self._thumbnail_to_original(img_src)
+                            if original_url:
+                                return original_url
+                    
                     # Method 4: Look for direct upload.wikimedia.org links in the page
                     # This catches images that are already original URLs
-                    wikimedia_pattern = r'https://upload\.wikimedia\.org/wikipedia/[^"\s<>]+\.(?:jpg|jpeg|png|gif|svg|webp)'
-                    matches = re.findall(wikimedia_pattern, html_content, re.IGNORECASE)
-                    if matches:
-                        # Prefer original URLs (not thumbnails)
-                        for url in matches:
+                    # Pattern needs to handle:
+                    # - URL-encoded characters (%27, %2C, etc.)
+                    # - URLs in various attributes (src, href, data-src, etc.)
+                    # - URLs that might span multiple lines
+                    # - Both commons and en namespaces
+                    
+                    # More comprehensive pattern that handles various contexts
+                    # Look for upload.wikimedia.org URLs in any attribute or as standalone URLs
+                    # The pattern: upload.wikimedia.org/wikipedia/(commons|en)/[hash]/[hash]/[filename]
+                    # Where [hash] is a single hex character, and filename can contain URL-encoded chars
+                    
+                    # Pattern 1: In HTML attributes (src, href, data-*, etc.)
+                    attr_pattern = r'(?:src|href|data-src|data-image|data-file|data-original)="(https://upload\.wikimedia\.org/wikipedia/(?:commons|en)/[a-f0-9]/[a-f0-9]{2}/[^"]+\.(?:jpg|jpeg|png|gif|svg|webp))"'
+                    
+                    # Pattern 2: Standalone URLs (in JSON, JavaScript, or plain text)
+                    # This pattern is more flexible and handles URL encoding
+                    standalone_pattern = r'https://upload\.wikimedia\.org/wikipedia/(?:commons|en)/[a-f0-9]/[a-f0-9]{2}/[^\s"\'<>\)]+(?:%[0-9a-fA-F]{2})*[^\s"\'<>\)]*\.(?:jpg|jpeg|png|gif|svg|webp)'
+                    
+                    all_matches = []
+                    
+                    # Search in attributes
+                    attr_matches = re.findall(attr_pattern, html_content, re.IGNORECASE | re.MULTILINE)
+                    if attr_matches:
+                        all_matches.extend(attr_matches)
+                    
+                    # Search for standalone URLs
+                    standalone_matches = re.findall(standalone_pattern, html_content, re.IGNORECASE | re.MULTILINE)
+                    if standalone_matches:
+                        all_matches.extend(standalone_matches)
+                    
+                    # Remove duplicates and decode URLs
+                    unique_matches = []
+                    seen = set()
+                    for url in all_matches:
+                        # Decode URL-encoded characters
+                        try:
+                            decoded_url = unquote(url) if '%' in url else url
+                        except:
+                            decoded_url = url
+                        
+                        # Normalize the URL (remove trailing query params, fragments, etc.)
+                        normalized = decoded_url.split('?')[0].split('#')[0]
+                        
+                        if normalized not in seen:
+                            seen.add(normalized)
+                            unique_matches.append(normalized)
+                    
+                    if unique_matches:
+                        # Prefer original URLs (not thumbnails) and commons over en
+                        # Also prefer images that seem to be the main artwork image
+                        for url in unique_matches:
+                            if '/thumb/' not in url:
+                                # Prefer commons namespace
+                                if '/commons/' in url:
+                                    return url
+                        
+                        # If no commons found, return first non-thumbnail
+                        for url in unique_matches:
                             if '/thumb/' not in url:
                                 return url
+                        
                         # If only thumbnails found, convert the first one
-                        if matches:
-                            original_url = self._thumbnail_to_original(matches[0])
+                        if unique_matches:
+                            original_url = self._thumbnail_to_original(unique_matches[0])
                             if original_url:
                                 return original_url
                     
