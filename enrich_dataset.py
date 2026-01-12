@@ -14,6 +14,14 @@ import requests
 from urllib.parse import quote, unquote
 from typing import Dict, List, Optional
 
+try:
+    from PIL import Image
+    PIL_AVAILABLE = True
+    # Increase PIL's decompression bomb limit to handle very large images
+    Image.MAX_IMAGE_PIXELS = None
+except ImportError:
+    PIL_AVAILABLE = False
+
 
 class WikipediaArtEnricher:
     """Handles Wikipedia API interactions and data enrichment."""
@@ -196,8 +204,17 @@ class WikipediaArtEnricher:
         
         return data
     
+    def _is_svg_url(self, url: str) -> bool:
+        """Check if a URL points to an SVG file (which we want to skip)."""
+        if not url:
+            return False
+        url_lower = url.lower()
+        # Check for .svg extension (may be URL-encoded or in query params)
+        return '.svg' in url_lower or '%2Esvg' in url_lower or '%2esvg' in url_lower
+    
     def get_image_url(self, title: str) -> Optional[str]:
-        """Get the main image URL for a Wikipedia article using multiple methods."""
+        """Get the main image URL for a Wikipedia article using multiple methods.
+        Skips SVG files as they are usually logos/icons, not artwork photos."""
         try:
             api_url = "https://en.wikipedia.org/w/api.php"
             
@@ -221,10 +238,13 @@ class WikipediaArtEnricher:
                     if 'original' in page_data:
                         original = page_data['original']
                         if isinstance(original, dict) and 'source' in original:
-                            return original['source']
+                            url = original['source']
+                            if not self._is_svg_url(url):
+                                return url
                         elif isinstance(original, str):
-                            return original
-                    
+                            if not self._is_svg_url(original):
+                                return original
+            
                     # Try thumbnail and convert to original
                     if 'thumbnail' in page_data:
                         thumbnail = page_data['thumbnail']
@@ -232,7 +252,7 @@ class WikipediaArtEnricher:
                             thumbnail_url = thumbnail['source']
                             # Convert thumbnail URL to original
                             original_url = self._thumbnail_to_original(thumbnail_url)
-                            if original_url:
+                            if original_url and not self._is_svg_url(original_url):
                                 return original_url
             
             # Method 2: Try from page summary thumbnail
@@ -240,7 +260,7 @@ class WikipediaArtEnricher:
             if summary and 'thumbnail' in summary:
                 thumbnail_url = summary['thumbnail']['source']
                 original_url = self._thumbnail_to_original(thumbnail_url)
-                if original_url:
+                if original_url and not self._is_svg_url(original_url):
                     return original_url
             
             # Method 3: Try parsing HTML for infobox image
@@ -263,7 +283,7 @@ class WikipediaArtEnricher:
                             img_src = 'https://en.wikipedia.org' + img_src
                         # Convert thumbnail to original
                         original_url = self._thumbnail_to_original(img_src)
-                        if original_url:
+                        if original_url and not self._is_svg_url(original_url):
                             return original_url
                     
                     # Also look for images in the main content area (not just infobox)
@@ -279,7 +299,7 @@ class WikipediaArtEnricher:
                         # Check if it's a Wikimedia URL
                         if 'upload.wikimedia.org' in img_src:
                             original_url = self._thumbnail_to_original(img_src)
-                            if original_url:
+                            if original_url and not self._is_svg_url(original_url):
                                 return original_url
                     
                     # Method 4: Look for direct upload.wikimedia.org links in the page
@@ -296,11 +316,13 @@ class WikipediaArtEnricher:
                     # Where [hash] is a single hex character, and filename can contain URL-encoded chars
                     
                     # Pattern 1: In HTML attributes (src, href, data-*, etc.)
-                    attr_pattern = r'(?:src|href|data-src|data-image|data-file|data-original)="(https://upload\.wikimedia\.org/wikipedia/(?:commons|en)/[a-f0-9]/[a-f0-9]{2}/[^"]+\.(?:jpg|jpeg|png|gif|svg|webp))"'
+                    # Exclude SVG files as they are usually logos/icons, not artwork photos
+                    attr_pattern = r'(?:src|href|data-src|data-image|data-file|data-original)="(https://upload\.wikimedia\.org/wikipedia/(?:commons|en)/[a-f0-9]/[a-f0-9]{2}/[^"]+\.(?:jpg|jpeg|png|gif|webp))"'
                     
                     # Pattern 2: Standalone URLs (in JSON, JavaScript, or plain text)
                     # This pattern is more flexible and handles URL encoding
-                    standalone_pattern = r'https://upload\.wikimedia\.org/wikipedia/(?:commons|en)/[a-f0-9]/[a-f0-9]{2}/[^\s"\'<>\)]+(?:%[0-9a-fA-F]{2})*[^\s"\'<>\)]*\.(?:jpg|jpeg|png|gif|svg|webp)'
+                    # Exclude SVG files as they are usually logos/icons, not artwork photos
+                    standalone_pattern = r'https://upload\.wikimedia\.org/wikipedia/(?:commons|en)/[a-f0-9]/[a-f0-9]{2}/[^\s"\'<>\)]+(?:%[0-9a-fA-F]{2})*[^\s"\'<>\)]*\.(?:jpg|jpeg|png|gif|webp)'
                     
                     all_matches = []
                     
@@ -334,34 +356,39 @@ class WikipediaArtEnricher:
                     if unique_matches:
                         # Prefer original URLs (not thumbnails) and commons over en
                         # Also prefer images that seem to be the main artwork image
+                        # Skip SVG files
                         for url in unique_matches:
-                            if '/thumb/' not in url:
+                            if '/thumb/' not in url and not self._is_svg_url(url):
                                 # Prefer commons namespace
                                 if '/commons/' in url:
                                     return url
                         
-                        # If no commons found, return first non-thumbnail
+                        # If no commons found, return first non-thumbnail (non-SVG)
                         for url in unique_matches:
-                            if '/thumb/' not in url:
+                            if '/thumb/' not in url and not self._is_svg_url(url):
                                 return url
                         
-                        # If only thumbnails found, convert the first one
-                        if unique_matches:
-                            original_url = self._thumbnail_to_original(unique_matches[0])
-                            if original_url:
+                        # If only thumbnails found, convert the first non-SVG one
+                        for url in unique_matches:
+                            original_url = self._thumbnail_to_original(url)
+                            if original_url and not self._is_svg_url(original_url):
                                 return original_url
                     
                     # Method 5: Look for data-src or data-image attributes (lazy-loaded images)
-                    lazy_pattern = r'(?:data-src|data-image)="([^"]*upload\.wikimedia\.org[^"]+\.(?:jpg|jpeg|png|gif|svg|webp))"'
+                    # Exclude SVG files as they are usually logos/icons, not artwork photos
+                    lazy_pattern = r'(?:data-src|data-image)="([^"]*upload\.wikimedia\.org[^"]+\.(?:jpg|jpeg|png|gif|webp))"'
                     lazy_matches = re.findall(lazy_pattern, html_content, re.IGNORECASE)
                     if lazy_matches:
                         for url in lazy_matches:
                             if not url.startswith('http'):
                                 url = 'https:' + url if url.startswith('//') else 'https://en.wikipedia.org' + url
+                            # Skip SVG files
+                            if self._is_svg_url(url):
+                                continue
                             if '/thumb/' not in url:
                                 return url
                             original_url = self._thumbnail_to_original(url)
-                            if original_url:
+                            if original_url and not self._is_svg_url(original_url):
                                 return original_url
             except Exception as e:
                 pass  # Silently fail HTML parsing
@@ -417,22 +444,114 @@ class WikipediaArtEnricher:
                 original = original.replace('/wikipedia/', '/wikipedia/en/')
             return original
         
-        return None
+            return None
     
-    def download_image(self, image_url: str, filename: str) -> bool:
-        """Download an image from URL to filename."""
+    def download_image(self, image_url: str, filename: str, max_size_mb: float = 1.0) -> bool:
+        """Download an image from URL to filename and resize to be under max_size_mb."""
         try:
             response = self.session.get(image_url, timeout=15, stream=True)
             if response.status_code == 200:
                 filepath = os.path.join(self.images_dir, filename)
-                with open(filepath, 'wb') as f:
+                
+                # Download to temporary file first
+                temp_path = filepath + '.tmp'
+                with open(temp_path, 'wb') as f:
                     for chunk in response.iter_content(chunk_size=8192):
                         f.write(chunk)
+                
+                # Resize image if it's too large and PIL is available
+                if PIL_AVAILABLE:
+                    try:
+                        self._resize_image_if_needed(temp_path, filepath, max_size_mb)
+                    except Exception as e:
+                        print(f"  Warning: Could not resize image: {e}")
+                        # If resizing fails, just use the original
+                        os.rename(temp_path, filepath)
+                else:
+                    # If PIL not available, just use the downloaded file
+                    os.rename(temp_path, filepath)
+                
                 return True
             return False
         except Exception as e:
             print(f"  Error downloading image: {e}")
+            # Clean up temp file if it exists
+            temp_path = os.path.join(self.images_dir, filename + '.tmp')
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
             return False
+    
+    def _resize_image_if_needed(self, input_path: str, output_path: str, max_size_mb: float = 1.0) -> None:
+        """Resize image to be under max_size_mb MB if needed."""
+        def get_file_size_mb(path: str) -> float:
+            return os.path.getsize(path) / (1024 * 1024)
+        
+        current_size_mb = get_file_size_mb(input_path)
+        
+        if current_size_mb <= max_size_mb:
+            # Image is already small enough, just rename
+            os.rename(input_path, output_path)
+            return
+        
+        # Need to resize
+        max_dimension = 2000
+        
+        with Image.open(input_path) as img:
+            # Convert to RGB if necessary (for JPEG)
+            if img.mode in ('RGBA', 'LA', 'P'):
+                background = Image.new('RGB', img.size, (255, 255, 255))
+                if img.mode == 'P':
+                    img = img.convert('RGBA')
+                background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+                img = background
+            elif img.mode != 'RGB':
+                img = img.convert('RGB')
+            
+            width, height = img.size
+            quality = 85
+            
+            # If file is extremely large, aggressively reduce dimensions first
+            if current_size_mb > 10:
+                aggressive_max_dim = 1200
+                if max(width, height) > aggressive_max_dim:
+                    if width > height:
+                        new_width = aggressive_max_dim
+                        new_height = int(height * (aggressive_max_dim / width))
+                    else:
+                        new_height = aggressive_max_dim
+                        new_width = int(width * (aggressive_max_dim / height))
+                    img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            elif max(width, height) > max_dimension:
+                if width > height:
+                    new_width = max_dimension
+                    new_height = int(height * (max_dimension / width))
+                else:
+                    new_height = max_dimension
+                    new_width = int(width * (max_dimension / height))
+                img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            
+            # Save with decreasing quality until we're under the size limit
+            attempts = 0
+            max_attempts = 20
+            
+            while attempts < max_attempts:
+                img.save(output_path, format='JPEG', quality=quality, optimize=True)
+                new_size_mb = get_file_size_mb(output_path)
+                
+                if new_size_mb <= max_size_mb:
+                    break
+                
+                # If still too large, reduce dimensions further
+                if attempts > 5 and new_size_mb > max_size_mb * 1.5:
+                    width, height = img.size
+                    img = img.resize((int(width * 0.9), int(height * 0.9)), Image.Resampling.LANCZOS)
+                
+                quality = max(50, quality - 5)
+                attempts += 1
+            
+            # Remove temp file
+            if os.path.exists(input_path):
+                os.remove(input_path)
     
     def enrich_art_piece(self, art_piece: Dict) -> Dict:
         """Enrich a single art piece with Wikipedia data."""
@@ -461,7 +580,8 @@ class WikipediaArtEnricher:
         
         # Check for existing images with various extensions
         existing_image = None
-        for ext in ['.jpg', '.jpeg', '.png', '.svg', '.webp', '.gif']:
+        # Check for existing images (excluding SVG)
+        for ext in ['.jpg', '.jpeg', '.png', '.webp', '.gif']:
             potential_filename = f"{base_filename}{ext}"
             potential_path = os.path.join(self.images_dir, potential_filename)
             if os.path.exists(potential_path):
@@ -504,33 +624,34 @@ class WikipediaArtEnricher:
         if image_url:
             print(f"  Found image: {image_url[:80]}...")
             
-            # Determine file extension from URL
-            extension = '.jpg'  # default
-            if '.png' in image_url.lower():
-                extension = '.png'
-            elif '.svg' in image_url.lower():
-                extension = '.svg'
-            elif '.webp' in image_url.lower():
-                extension = '.webp'
-            elif '.gif' in image_url.lower():
-                extension = '.gif'
-            elif '.jpeg' in image_url.lower():
-                extension = '.jpeg'
-            
-            image_filename = f"{base_filename}{extension}"
+            # Always save as .jpg since we resize and convert to JPEG
+            # This ensures consistent format and size
+            image_filename = f"{base_filename}.jpg"
             image_path = os.path.join(self.images_dir, image_filename)
             
-            # Double-check if image exists (in case extension changed)
+            # Double-check if image exists (check for .jpg or other extensions)
             if os.path.exists(image_path):
                 print(f"  Image already exists: {image_filename}")
                 enriched['image_filename'] = f"images/{image_filename}"
             else:
-                if self.download_image(image_url, image_filename):
-                    print(f"  ✓ Downloaded image: {image_filename}")
-                    enriched['image_filename'] = f"images/{image_filename}"
-                else:
-                    print(f"  ⚠️  Failed to download image")
-                    enriched['image_filename'] = None
+                # Also check for other extensions
+                found_existing = False
+                # Check for existing images (excluding SVG)
+                for ext in ['.jpg', '.jpeg', '.png', '.webp', '.gif']:
+                    potential_path = os.path.join(self.images_dir, f"{base_filename}{ext}")
+                    if os.path.exists(potential_path):
+                        print(f"  Image already exists: {base_filename}{ext}")
+                        enriched['image_filename'] = f"images/{base_filename}{ext}"
+                        found_existing = True
+                        break
+                
+                if not found_existing:
+                    if self.download_image(image_url, image_filename):
+                        print(f"  ✓ Downloaded and resized image: {image_filename}")
+                        enriched['image_filename'] = f"images/{image_filename}"
+                    else:
+                        print(f"  ⚠️  Failed to download image")
+                        enriched['image_filename'] = None
         else:
             print(f"  ⚠️  No image found")
             enriched['image_filename'] = None
