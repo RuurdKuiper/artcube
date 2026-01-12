@@ -376,6 +376,7 @@
         let hoveredPoint = null;
         let isWhiteBackground = false;
         let lastClickedPoint = null; // Track last clicked point for mobile double-click behavior
+        let pointWasClicked = false; // Flag to track if a point was clicked (for click-outside detection)
 
         // Initialize
         async function init() {
@@ -986,28 +987,53 @@
             const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
             const y = (vector.y * -0.5 + 0.5) * window.innerHeight;
 
-            // Position tooltip to the right of the point with small offset
+            // Position tooltip
             tooltip.style.display = 'block';
             const isMobile = window.innerWidth <= 768 || 'ontouchstart' in window;
             const tooltipWidth = isMobile ? 250 : 400;
             const tooltipHeight = isMobile ? 350 : 500;
-            const offset = 30; // Small offset from point
-            let left = x + offset;
-            let top = y;
+            
+            if (isMobile) {
+                // On mobile, position tooltip in bottom half of screen (with room for controls/legend)
+                const bottomSpace = 80; // Room for controls/legend
+                const topSpace = 10; // Small margin from top
+                const availableHeight = window.innerHeight - topSpace - bottomSpace;
+                
+                // Center horizontally, position in bottom half
+                let left = (window.innerWidth - tooltipWidth) / 2;
+                let top = topSpace + (availableHeight / 2); // Start in middle of available space
+                
+                // Ensure it doesn't go off-screen
+                if (left < 10) left = 10;
+                if (left + tooltipWidth > window.innerWidth - 10) {
+                    left = window.innerWidth - tooltipWidth - 10;
+                }
+                if (top + tooltipHeight > window.innerHeight - bottomSpace) {
+                    top = window.innerHeight - tooltipHeight - bottomSpace;
+                }
+                
+                tooltip.style.left = left + 'px';
+                tooltip.style.top = top + 'px';
+            } else {
+                // Desktop: Position to the right of the point with small offset
+                const offset = 30;
+                let left = x + offset;
+                let top = y;
 
-            // Adjust if off-screen
-            if (left + tooltipWidth > window.innerWidth) {
-                left = x - tooltipWidth - offset;
-            }
-            if (top + tooltipHeight > window.innerHeight) {
-                top = window.innerHeight - tooltipHeight - 20;
-            }
-            if (top < 0) {
-                top = 20;
-            }
+                // Adjust if off-screen
+                if (left + tooltipWidth > window.innerWidth) {
+                    left = x - tooltipWidth - offset;
+                }
+                if (top + tooltipHeight > window.innerHeight) {
+                    top = window.innerHeight - tooltipHeight - 20;
+                }
+                if (top < 0) {
+                    top = 20;
+                }
 
-            tooltip.style.left = left + 'px';
-            tooltip.style.top = top + 'px';
+                tooltip.style.left = left + 'px';
+                tooltip.style.top = top + 'px';
+            }
         }
 
         function onMouseClick(event) {
@@ -1033,11 +1059,12 @@
 
             raycaster.setFromCamera(mouse, camera);
             const intersects = raycaster.intersectObjects(points);
+            const isMobile = window.innerWidth <= 768 || 'ontouchstart' in window;
 
             if (intersects.length > 0) {
                 const point = intersects[0].object;
                 const artwork = point.userData.artwork;
-                const isMobile = window.innerWidth <= 768 || 'ontouchstart' in window;
+                pointWasClicked = true; // Set flag to indicate point was clicked
                 
                 if (isMobile) {
                     // Mobile behavior: first click shows tooltip, second click opens Wikipedia
@@ -1062,6 +1089,24 @@
                         window.open(artwork.wikipedia_url, '_blank');
                     }
                 }
+            } else {
+                // Clicked outside any point
+                if (isMobile) {
+                    // On mobile, close tooltip if clicked outside
+                    const tooltip = document.getElementById('tooltip');
+                    if (tooltip.style.display === 'block') {
+                        tooltip.style.display = 'none';
+                        lastClickedPoint = null;
+                        hoveredPoint = null;
+                    }
+                }
+            }
+            
+            // Reset flag after a short delay (for event propagation)
+            if (isMobile) {
+                setTimeout(function() {
+                    pointWasClicked = false;
+                }, 0);
             }
         }
 

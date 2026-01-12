@@ -137,7 +137,7 @@
 
         #legend {
             position: absolute;
-            top: 80px;
+            top: 120px;
             right: 20px;
             background: rgba(0, 0, 0, 0.9);
             padding: 15px;
@@ -167,7 +167,8 @@
         /* Mobile responsive styles */
         @media (max-width: 768px) {
             #nav-button {
-                top: 10px;
+                top: auto;
+                bottom: 80px;
                 right: 10px;
                 padding: 8px 12px;
                 font-size: 14px;
@@ -178,7 +179,7 @@
             }
 
             #legend {
-                top: 50px;
+                top: 70px;
                 right: 10px;
                 padding: 10px;
                 min-width: 150px;
@@ -330,8 +331,8 @@
             <div id="timeline-handle-labels"></div>
             <div id="timeline-slider"></div>
             <div id="timeline-values">
-                <span id="timeline-start">-38000 BCE</span>
-                <span id="timeline-end">2003 CE</span>
+                <span id="timeline-start">-75000 BCE</span>
+                <span id="timeline-end">2012 CE</span>
             </div>
             <div id="timeline-markers"></div>
         </div>
@@ -368,9 +369,10 @@
         let metadata = {};
         let markers = [];
         let markersLayer;
-        let currentYearRange = { min: -38000, max: 2003 };
+        let currentYearRange = { min: -75000, max: 2012 };
         let typeColors = {};
         let lastClickedMarker = null; // Track last clicked marker for mobile double-click behavior
+        let markerWasClicked = false; // Flag to track if a marker was clicked (for click-outside detection)
 
         // Color palette for artwork types
         const TYPE_COLORS = {
@@ -500,8 +502,10 @@
             const endPos = yearToSliderPosition(maxYear, minYear, maxYear);
             slider.noUiSlider.set([startPos, endPos]);
 
-            // Create year markers at key positions
-            createTimelineMarkers(minYear, maxYear);
+            // Create year markers at key positions (use setTimeout to ensure slider is rendered)
+            setTimeout(() => {
+                createTimelineMarkers(minYear, maxYear);
+            }, 0);
             
             // Create handle labels
             updateHandleLabels(slider, minYear, maxYear);
@@ -517,10 +521,7 @@
                 currentYearRange = { min: startYear, max: endYear };
                 
                 // Update display
-                document.getElementById('timeline-start').textContent = formatYear(startYear);
-                document.getElementById('timeline-end').textContent = formatYear(endYear);
-                
-                // Update handle labels
+                // Update handle labels (shown above sliders)
                 updateHandleLabels(slider, minYear, maxYear);
                 
                 // Update markers
@@ -571,23 +572,32 @@
 
         function createTimelineMarkers(minYear, maxYear) {
             const markersContainer = document.getElementById('timeline-markers');
+            const sliderElement = document.getElementById('timeline-slider');
             
             // Years to mark: -2000, 0, 500, 1000, 1500, 1900
+            // Exclude the extreme values (minYear and maxYear)
             const markerYears = [-2000, 0, 500, 1000, 1500, 1900];
             
             // Clear existing markers
             markersContainer.innerHTML = '';
             
+            // Get slider's actual position and width to align markers correctly
+            const sliderRect = sliderElement.getBoundingClientRect();
+            const markersRect = markersContainer.getBoundingClientRect();
+            const sliderLeft = sliderRect.left - markersRect.left;
+            const sliderWidth = sliderRect.width;
+            
             markerYears.forEach(year => {
-                // Only show markers that are within the overall range
-                if (year >= minYear && year <= maxYear) {
+                // Only show markers that are within the overall range, but exclude extremes
+                if (year > minYear && year < maxYear) {
                     const position = yearToSliderPosition(year, minYear, maxYear);
-                    const leftPercent = position * 100;
+                    // Calculate pixel position relative to markers container
+                    const leftPixels = sliderLeft + (position * sliderWidth);
                     
                     const marker = document.createElement('div');
                     marker.className = 'timeline-marker';
                     marker.textContent = formatYear(year);
-                    marker.style.left = `${leftPercent}%`;
+                    marker.style.left = `${leftPixels}px`;
                     
                     markersContainer.appendChild(marker);
                 }
@@ -843,6 +853,8 @@
                         const isMobile = window.innerWidth <= 768 || 'ontouchstart' in window;
                         
                         if (isMobile) {
+                            markerWasClicked = true; // Set flag to indicate marker was clicked
+                            
                             // Mobile behavior: first click shows tooltip, second click opens Wikipedia
                             if (lastClickedMarker === marker && document.getElementById('tooltip').style.display === 'block') {
                                 // Second click on same marker - open Wikipedia
@@ -854,7 +866,7 @@
                             } else {
                                 // First click (or click on different marker) - show tooltip
                                 lastClickedMarker = marker;
-                                // Get click position for tooltip placement
+                                // Get click position for tooltip placement (won't be used on mobile, but required)
                                 const containerPoint = e.containerPoint || map.latLngToContainerPoint(e.latlng);
                                 const syntheticEvent = {
                                     clientX: containerPoint.x,
@@ -886,6 +898,22 @@
             // Update marker positions when zoom changes
             map.on('zoomend', updateMarkerPositions);
             map.on('moveend', updateMarkerPositions);
+            
+            // Close tooltip when clicking on map (not on a marker) on mobile
+            const isMobile = window.innerWidth <= 768 || 'ontouchstart' in window;
+            if (isMobile) {
+                map.on('click', function(e) {
+                    // Marker click events fire before map click, so check the flag
+                    setTimeout(function() {
+                        if (!markerWasClicked) {
+                            // Clicked on map, not on a marker - close tooltip
+                            hideTooltip();
+                            lastClickedMarker = null;
+                        }
+                        markerWasClicked = false; // Reset flag
+                    }, 0);
+                });
+            }
         }
 
         function showTooltip(artwork, event) {
@@ -928,31 +956,54 @@
 
         function updateTooltipPosition(event) {
             const tooltip = document.getElementById('tooltip');
-            const offset = 15; // Fixed distance from mouse cursor
+            const isMobile = window.innerWidth <= 768 || 'ontouchstart' in window;
             
-            // Always position to the right of the mouse with fixed offset
-            let left = event.clientX + offset;
-            let top = event.clientY + offset;
+            if (isMobile) {
+                // On mobile, position tooltip in bottom half of screen (with room for controls)
+                const tooltipWidth = 250;
+                const tooltipHeight = 350;
+                // Center horizontally, position in bottom half with room for controls/legend
+                const bottomSpace = 80; // Room for controls/legend
+                const topSpace = 60; // Room for timeline
+                const availableHeight = window.innerHeight - topSpace - bottomSpace;
+                
+                let left = (window.innerWidth - tooltipWidth) / 2;
+                let top = topSpace + (availableHeight / 2); // Start in middle of available space
+                
+                // Ensure it doesn't go off-screen
+                if (left < 10) left = 10;
+                if (left + tooltipWidth > window.innerWidth - 10) {
+                    left = window.innerWidth - tooltipWidth - 10;
+                }
+                if (top + tooltipHeight > window.innerHeight - bottomSpace) {
+                    top = window.innerHeight - tooltipHeight - bottomSpace;
+                }
+                
+                tooltip.style.left = left + 'px';
+                tooltip.style.top = top + 'px';
+            } else {
+                // Desktop positioning: to the right of the mouse
+                const offset = 15;
+                let left = event.clientX + offset;
+                let top = event.clientY + offset;
 
-            // Only adjust if it would go off-screen to the right
-            const tooltipWidth = 300;
-            if (left + tooltipWidth > window.innerWidth) {
-                left = event.clientX - tooltipWidth - offset;
+                const tooltipWidth = 300;
+                if (left + tooltipWidth > window.innerWidth) {
+                    left = event.clientX - tooltipWidth - offset;
+                }
+
+                const tooltipHeight = 400;
+                if (top + tooltipHeight > window.innerHeight) {
+                    top = event.clientY - tooltipHeight - offset;
+                }
+
+                if (top < 0) {
+                    top = offset;
+                }
+
+                tooltip.style.left = left + 'px';
+                tooltip.style.top = top + 'px';
             }
-
-            // Only adjust if it would go off-screen at the bottom
-            const tooltipHeight = 400;
-            if (top + tooltipHeight > window.innerHeight) {
-                top = event.clientY - tooltipHeight - offset;
-            }
-
-            // Ensure it doesn't go off-screen at the top
-            if (top < 0) {
-                top = offset;
-            }
-
-            tooltip.style.left = left + 'px';
-            tooltip.style.top = top + 'px';
         }
 
         function hideTooltip() {
@@ -976,7 +1027,13 @@
         }
 
         // Handle window resize
-        window.addEventListener('resize', setupMobileLegendToggle);
+        window.addEventListener('resize', function() {
+            setupMobileLegendToggle();
+            // Update timeline markers position on resize
+            if (metadata && metadata.year_range) {
+                createTimelineMarkers(metadata.year_range.min, metadata.year_range.max);
+            }
+        });
 
         // Start the application
         init();
