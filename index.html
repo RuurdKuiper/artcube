@@ -246,8 +246,8 @@
             }
 
             #tooltip-image {
-                max-width: 100px;
-                max-height: 100px;
+                max-width: 50px;
+                max-height: 50px;
             }
 
             #tooltip-title {
@@ -848,8 +848,8 @@
                         }
                     });
 
-                    // Add click handler
-                    marker.on('click', function(e) {
+                    // Add click handler (works for both desktop and mobile)
+                    const handleMarkerClick = function(e) {
                         const isMobile = window.innerWidth <= 768 || 'ontouchstart' in window;
                         
                         if (isMobile) {
@@ -867,7 +867,7 @@
                                 // First click (or click on different marker) - show tooltip
                                 lastClickedMarker = marker;
                                 // Get click position for tooltip placement (won't be used on mobile, but required)
-                                const containerPoint = e.containerPoint || map.latLngToContainerPoint(e.latlng);
+                                const containerPoint = e.containerPoint || (e.latlng ? map.latLngToContainerPoint(e.latlng) : e);
                                 const syntheticEvent = {
                                     clientX: containerPoint.x,
                                     clientY: containerPoint.y
@@ -880,6 +880,16 @@
                                 window.open(artwork.wikipedia_url, '_blank');
                             }
                         }
+                    };
+                    
+                    marker.on('click', handleMarkerClick);
+                    // Also add touchend for mobile devices that might not fire click events properly
+                    marker.on('touchend', function(e) {
+                        // Prevent default to avoid double-firing
+                        if (e.originalEvent) {
+                            e.originalEvent.preventDefault();
+                        }
+                        handleMarkerClick(e);
                     });
 
                     // Store artwork data and original coordinates in marker
