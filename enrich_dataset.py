@@ -249,6 +249,7 @@ class WikipediaArtEnricher:
                 html_response = self.session.get(page_url, timeout=10)
                 if html_response.status_code == 200:
                     html_content = html_response.text
+                    
                     # Look for infobox image
                     # Pattern: <img src="..." in infobox
                     infobox_pattern = r'<table[^>]*class="[^"]*infobox[^"]*"[^>]*>.*?<img[^>]*src="([^"]+)"'
@@ -264,6 +265,34 @@ class WikipediaArtEnricher:
                         original_url = self._thumbnail_to_original(img_src)
                         if original_url:
                             return original_url
+                    
+                    # Method 4: Look for direct upload.wikimedia.org links in the page
+                    # This catches images that are already original URLs
+                    wikimedia_pattern = r'https://upload\.wikimedia\.org/wikipedia/[^"\s<>]+\.(?:jpg|jpeg|png|gif|svg|webp)'
+                    matches = re.findall(wikimedia_pattern, html_content, re.IGNORECASE)
+                    if matches:
+                        # Prefer original URLs (not thumbnails)
+                        for url in matches:
+                            if '/thumb/' not in url:
+                                return url
+                        # If only thumbnails found, convert the first one
+                        if matches:
+                            original_url = self._thumbnail_to_original(matches[0])
+                            if original_url:
+                                return original_url
+                    
+                    # Method 5: Look for data-src or data-image attributes (lazy-loaded images)
+                    lazy_pattern = r'(?:data-src|data-image)="([^"]*upload\.wikimedia\.org[^"]+\.(?:jpg|jpeg|png|gif|svg|webp))"'
+                    lazy_matches = re.findall(lazy_pattern, html_content, re.IGNORECASE)
+                    if lazy_matches:
+                        for url in lazy_matches:
+                            if not url.startswith('http'):
+                                url = 'https:' + url if url.startswith('//') else 'https://en.wikipedia.org' + url
+                            if '/thumb/' not in url:
+                                return url
+                            original_url = self._thumbnail_to_original(url)
+                            if original_url:
+                                return original_url
             except Exception as e:
                 pass  # Silently fail HTML parsing
             
@@ -354,6 +383,25 @@ class WikipediaArtEnricher:
         enriched['significance'] = None
         enriched['image_filename'] = None
         
+        # FIRST: Check if we already have an image for this artwork
+        # If image exists, skip Wikipedia entirely
+        sanitized_artist = self.sanitize_filename(artist)
+        sanitized_title = self.sanitize_filename(title)
+        base_filename = f"{sanitized_artist}_{sanitized_title}"
+        
+        # Check for existing images with various extensions
+        existing_image = None
+        for ext in ['.jpg', '.jpeg', '.png', '.svg', '.webp', '.gif']:
+            potential_filename = f"{base_filename}{ext}"
+            potential_path = os.path.join(self.images_dir, potential_filename)
+            if os.path.exists(potential_path):
+                existing_image = potential_filename
+                print(f"  ✓ Image already exists: {existing_image}")
+                enriched['image_filename'] = f"images/{existing_image}"
+                # Skip Wikipedia if image already exists
+                return enriched
+        
+        # Only if image doesn't exist, search Wikipedia
         # Search for Wikipedia article
         wiki_title = self.search_wikipedia(title)
         if not wiki_title:
@@ -381,59 +429,41 @@ class WikipediaArtEnricher:
                 # Could add logic here to extract key points about significance
                 pass
         
-        # Get and download image
-        # First check if we already have an image for this artwork
-        sanitized_artist = self.sanitize_filename(artist)
-        sanitized_title = self.sanitize_filename(title)
-        base_filename = f"{sanitized_artist}_{sanitized_title}"
-        
-        # Check for existing images with various extensions
-        existing_image = None
-        for ext in ['.jpg', '.jpeg', '.png', '.svg', '.webp', '.gif']:
-            potential_filename = f"{base_filename}{ext}"
-            potential_path = os.path.join(self.images_dir, potential_filename)
-            if os.path.exists(potential_path):
-                existing_image = potential_filename
-                print(f"  Image already exists: {existing_image}")
-                enriched['image_filename'] = f"images/{existing_image}"
-                break
-        
-        # Only fetch and download if we don't have the image
-        if not existing_image:
-            image_url = self.get_image_url(wiki_title)
-            if image_url:
-                print(f"  Found image: {image_url[:80]}...")
-                
-                # Determine file extension from URL
-                extension = '.jpg'  # default
-                if '.png' in image_url.lower():
-                    extension = '.png'
-                elif '.svg' in image_url.lower():
-                    extension = '.svg'
-                elif '.webp' in image_url.lower():
-                    extension = '.webp'
-                elif '.gif' in image_url.lower():
-                    extension = '.gif'
-                elif '.jpeg' in image_url.lower():
-                    extension = '.jpeg'
-                
-                image_filename = f"{base_filename}{extension}"
-                image_path = os.path.join(self.images_dir, image_filename)
-                
-                # Double-check if image exists (in case extension changed)
-                if os.path.exists(image_path):
-                    print(f"  Image already exists: {image_filename}")
+        # Get and download image from Wikipedia
+        image_url = self.get_image_url(wiki_title)
+        if image_url:
+            print(f"  Found image: {image_url[:80]}...")
+            
+            # Determine file extension from URL
+            extension = '.jpg'  # default
+            if '.png' in image_url.lower():
+                extension = '.png'
+            elif '.svg' in image_url.lower():
+                extension = '.svg'
+            elif '.webp' in image_url.lower():
+                extension = '.webp'
+            elif '.gif' in image_url.lower():
+                extension = '.gif'
+            elif '.jpeg' in image_url.lower():
+                extension = '.jpeg'
+            
+            image_filename = f"{base_filename}{extension}"
+            image_path = os.path.join(self.images_dir, image_filename)
+            
+            # Double-check if image exists (in case extension changed)
+            if os.path.exists(image_path):
+                print(f"  Image already exists: {image_filename}")
+                enriched['image_filename'] = f"images/{image_filename}"
+            else:
+                if self.download_image(image_url, image_filename):
+                    print(f"  ✓ Downloaded image: {image_filename}")
                     enriched['image_filename'] = f"images/{image_filename}"
                 else:
-                    if self.download_image(image_url, image_filename):
-                        print(f"  ✓ Downloaded image: {image_filename}")
-                        enriched['image_filename'] = f"images/{image_filename}"
-                    else:
-                        print(f"  ⚠️  Failed to download image")
-                        enriched['image_filename'] = None
-            else:
-                print(f"  ⚠️  No image found")
-                enriched['image_filename'] = None
+                    print(f"  ⚠️  Failed to download image")
+                    enriched['image_filename'] = None
+        else:
+            print(f"  ⚠️  No image found")
+            enriched['image_filename'] = None
         
         # Small delay to be respectful to Wikipedia API
         time.sleep(0.5)

@@ -543,11 +543,9 @@
                 });
             }
 
-            // Add markers for filtered artworks
+            // Group artworks by coordinates to handle overlapping markers
+            const coordinateGroups = new Map();
             artworksWithCoords.forEach(artwork => {
-                const color = typeColors[artwork.type.name] || '#CCCCCC';
-                
-                // Extract coordinates (handle both object and array formats)
                 let lat, lng;
                 if (Array.isArray(artwork.coordinates)) {
                     lat = artwork.coordinates[0];
@@ -557,45 +555,156 @@
                     lng = artwork.coordinates.lng;
                 }
                 
-                // Create colored circle marker
-                const marker = L.circleMarker(
-                    [lat, lng],
-                    {
-                        radius: 8,
-                        fillColor: color,
-                        color: '#fff',
-                        weight: 2,
-                        opacity: 1,
-                        fillOpacity: 0.8
-                    }
-                );
-
-                // Add hover tooltip
-                marker.on('mouseover', function(e) {
-                    showTooltip(artwork, e.originalEvent);
-                });
-
-                marker.on('mouseout', function() {
-                    hideTooltip();
-                });
-
-                marker.on('mousemove', function(e) {
-                    updateTooltipPosition(e.originalEvent);
-                });
-
-                // Add click handler to open Wikipedia
-                marker.on('click', function() {
-                    if (artwork.wikipedia_url) {
-                        window.open(artwork.wikipedia_url, '_blank');
-                    }
-                });
-
-                // Store artwork data in marker
-                marker.artwork = artwork;
-
-                marker.addTo(markersLayer);
-                markers.push(marker);
+                // Create a key from rounded coordinates (to group nearby markers)
+                // Round to 4 decimal places (~11 meters precision)
+                const key = `${lat.toFixed(4)},${lng.toFixed(4)}`;
+                
+                if (!coordinateGroups.has(key)) {
+                    coordinateGroups.set(key, []);
+                }
+                coordinateGroups.get(key).push({artwork, lat, lng});
             });
+            
+            // Function to calculate pixel offset based on zoom level
+            function calculatePixelOffset(index, total, zoom) {
+                if (total === 1) {
+                    return {x: 0, y: 0};
+                }
+                
+                // Calculate angle for this marker (distribute evenly in a circle)
+                const angle = (2 * Math.PI * index) / total;
+                
+                // Base pixel radius scales with zoom: larger at lower zoom, smaller at higher zoom
+                // At zoom 1: ~100px radius, at zoom 18: ~10px radius
+                const basePixelRadius = Math.pow(1.2, zoom - 1) * 2;
+                // const basePixelRadius = 10;
+                const pixelRadius = basePixelRadius * (1 + Math.log(total) / 3);
+                
+                return {
+                    x: pixelRadius * Math.cos(angle),
+                    y: pixelRadius * Math.sin(angle)
+                };
+            }
+            
+            // Function to update marker positions based on current zoom
+            function updateMarkerPositions() {
+                const zoom = map.getZoom();
+                
+                // Group markers by their original coordinates
+                const markersByGroup = new Map();
+                markers.forEach(marker => {
+                    if (marker.groupKey && marker.groupSize > 1) {
+                        if (!markersByGroup.has(marker.groupKey)) {
+                            markersByGroup.set(marker.groupKey, []);
+                        }
+                        markersByGroup.get(marker.groupKey).push(marker);
+                    }
+                });
+                
+                // Update positions for each group
+                markersByGroup.forEach((groupMarkers, key) => {
+                    if (groupMarkers.length === 0) return;
+                    
+                    // Get base coordinates from first marker
+                    const baseMarker = groupMarkers[0];
+                    const baseLat = baseMarker.originalLat;
+                    const baseLng = baseMarker.originalLng;
+                    const basePoint = map.latLngToContainerPoint([baseLat, baseLng]);
+                    
+                    groupMarkers.forEach(marker => {
+                        // Calculate pixel offset
+                        const pixelOffset = calculatePixelOffset(
+                            marker.groupIndex, 
+                            marker.groupSize, 
+                            zoom
+                        );
+                        
+                        // Convert pixel offset back to lat/lng
+                        const offsetPoint = L.point(
+                            basePoint.x + pixelOffset.x,
+                            basePoint.y + pixelOffset.y
+                        );
+                        const offsetLatLng = map.containerPointToLatLng(offsetPoint);
+                        
+                        // Update marker position
+                        marker.setLatLng(offsetLatLng);
+                    });
+                });
+            }
+            
+            // Add markers for filtered artworks with offsets
+            coordinateGroups.forEach((group, key) => {
+                group.forEach((item, index) => {
+                    const {artwork, lat, lng} = item;
+                    const color = typeColors[artwork.type.name] || '#CCCCCC';
+                    
+                    // For initial placement, calculate offset using current zoom
+                    const zoom = map.getZoom();
+                    let markerLat = lat;
+                    let markerLng = lng;
+                    
+                    if (group.length > 1) {
+                        // Calculate pixel offset
+                        const basePoint = map.latLngToContainerPoint([lat, lng]);
+                        const pixelOffset = calculatePixelOffset(index, group.length, zoom);
+                        const offsetPoint = L.point(
+                            basePoint.x + pixelOffset.x,
+                            basePoint.y + pixelOffset.y
+                        );
+                        const offsetLatLng = map.containerPointToLatLng(offsetPoint);
+                        markerLat = offsetLatLng.lat;
+                        markerLng = offsetLatLng.lng;
+                    }
+                    
+                    // Create colored circle marker
+                    const marker = L.circleMarker(
+                        [markerLat, markerLng],
+                        {
+                            radius: 8,
+                            fillColor: color,
+                            color: '#fff',
+                            weight: 2,
+                            opacity: 1,
+                            fillOpacity: 0.8
+                        }
+                    );
+
+                    // Add hover tooltip
+                    marker.on('mouseover', function(e) {
+                        showTooltip(artwork, e.originalEvent);
+                    });
+
+                    marker.on('mouseout', function() {
+                        hideTooltip();
+                    });
+
+                    marker.on('mousemove', function(e) {
+                        updateTooltipPosition(e.originalEvent);
+                    });
+
+                    // Add click handler to open Wikipedia
+                    marker.on('click', function() {
+                        if (artwork.wikipedia_url) {
+                            window.open(artwork.wikipedia_url, '_blank');
+                        }
+                    });
+
+                    // Store artwork data and original coordinates in marker
+                    marker.artwork = artwork;
+                    marker.originalLat = lat;
+                    marker.originalLng = lng;
+                    marker.groupKey = key;
+                    marker.groupIndex = index;
+                    marker.groupSize = group.length;
+
+                    marker.addTo(markersLayer);
+                    markers.push(marker);
+                });
+            });
+            
+            // Update marker positions when zoom changes
+            map.on('zoomend', updateMarkerPositions);
+            map.on('moveend', updateMarkerPositions);
         }
 
         function showTooltip(artwork, event) {
