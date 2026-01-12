@@ -3,7 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Artwork 3D Visualization</title>
+    <title>Artwork Map Visualization</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <!-- noUiSlider CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/nouislider@15.7.1/dist/nouislider.min.css" />
+    
     <style>
         * {
             margin: 0;
@@ -22,18 +29,78 @@
             width: 100vw;
             height: 100vh;
             position: relative;
+            display: flex;
+            flex-direction: column;
         }
 
-        #canvas-container {
+        #map {
+            flex: 1;
             width: 100%;
-            height: 100%;
+            z-index: 1;
+        }
+
+        #timeline-container {
+            background: rgba(0, 0, 0, 0.9);
+            padding: 20px;
+            z-index: 1000;
+            border-top: 2px solid #444;
+        }
+
+        #timeline-label {
+            text-align: center;
+            margin-bottom: 15px;
+            font-size: 16px;
+            font-weight: bold;
+            color: #fff;
+        }
+
+        #timeline-slider {
+            max-width: 90%;
+            margin: 0 auto;
+        }
+
+        #timeline-values {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+            font-size: 14px;
+            color: #ccc;
+            position: relative;
+        }
+
+        #timeline-markers {
+            position: relative;
+            height: 15px;
+            margin-top: -18px;
+        }
+
+        .timeline-marker {
+            position: absolute;
+            font-size: 14px;
+            color: #aaa;
+            transform: translateX(-50%);
+        }
+
+        #timeline-handle-labels {
+            position: relative;
+            height: 20px;
+            margin-bottom: 5px;
+        }
+
+        .timeline-handle-label {
+            position: absolute;
+            font-size: 14px;
+            color: #fff;
+            font-weight: bold;
+            transform: translateX(-50%);
+            white-space: nowrap;
         }
 
         #nav-button {
             position: absolute;
             top: 20px;
             right: 20px;
-            z-index: 101;
+            z-index: 1001;
             background: rgba(0, 0, 0, 0.9);
             border: 2px solid #555;
             border-radius: 10px;
@@ -62,71 +129,41 @@
             color: #4a9eff;
         }
 
-        #controls {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            background: rgba(0, 0, 0, 0.8);
-            padding: 20px;
-            border-radius: 10px;
-            z-index: 100;
-            min-width: 250px;
-            backdrop-filter: blur(10px);
-        }
-
-        #controls h2 {
-            margin-bottom: 15px;
-            color: #fff;
-            font-size: 18px;
-        }
-
-        .axis-control {
-            margin-bottom: 15px;
-        }
-
-        .axis-control label {
-            display: block;
-            margin-bottom: 5px;
-            font-size: 14px;
-            color: #ccc;
-        }
-
-        .axis-control select {
-            width: 100%;
-            padding: 8px;
-            background: #2a2a2a;
-            color: #fff;
-            border: 1px solid #444;
-            border-radius: 5px;
-            font-size: 14px;
-            cursor: pointer;
-        }
-
-        .axis-control select:hover {
-            background: #333;
-        }
-
         #legend {
             position: absolute;
-            bottom: 20px;
+            top: 80px;
             right: 20px;
-            background: rgba(0, 0, 0, 0.8);
+            background: rgba(0, 0, 0, 0.9);
             padding: 15px;
             border-radius: 10px;
-            z-index: 100;
+            z-index: 1000;
             min-width: 200px;
             backdrop-filter: blur(10px);
+            border: 2px solid #555;
         }
 
         #legend h3 {
             margin-bottom: 10px;
-            font-size: 16px;
+            font-size: 14px;
             color: #fff;
         }
 
         #legend-content {
-            font-size: 14px;
-            color: #ccc;
+            font-size: 12px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            margin-right: 10px;
+            border: 2px solid #fff;
         }
 
         #tooltip {
@@ -135,8 +172,8 @@
             padding: 15px;
             border-radius: 10px;
             pointer-events: none;
-            z-index: 1000;
-            max-width: 400px;
+            z-index: 2000;
+            max-width: 300px;
             display: none;
             border: 2px solid #555;
             backdrop-filter: blur(10px);
@@ -144,12 +181,10 @@
 
         #tooltip-image {
             width: 100%;
-            max-width: 300px;
-            max-height: 300px;
+            max-width: 150px;
             height: auto;
             border-radius: 5px;
             margin-bottom: 10px;
-            object-fit: contain;
         }
 
         #tooltip-title {
@@ -169,87 +204,41 @@
             margin-bottom: 3px;
         }
 
-        #axis-labels {
-            position: absolute;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-            z-index: 50;
+        .noUi-handle {
+            background: #4CAF50;
+            border: 2px solid #fff;
+            cursor: pointer;
         }
 
-        .axis-label {
-            position: absolute;
-            font-size: 16px;
-            font-weight: bold;
-            color: #fff;
-            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
-        }
-
-        .axis-label.x-axis {
-            bottom: 30px;
-            left: 50%;
-            transform: translateX(-50%);
-        }
-
-        .axis-label.y-axis {
-            left: 30px;
-            top: 50%;
-            transform: translateY(-50%) rotate(-90deg);
-        }
-
-        .axis-label.z-axis {
-            top: 30px;
-            right: 30px;
+        .noUi-connect {
+            background: #4CAF50;
         }
     </style>
 </head>
 <body>
     <div id="container">
-        <div id="canvas-container"></div>
+        <div id="map"></div>
         
-        <div id="nav-button">
-            <a href="index.html">
-                <span>🗺️</span>
-                <span>Map View</span>
-            </a>
+        <div id="timeline-container">
+            <div id="timeline-label">Timeline Range</div>
+            <div id="timeline-handle-labels"></div>
+            <div id="timeline-slider"></div>
+            <div id="timeline-values">
+                <span id="timeline-start">-38000 BCE</span>
+                <span id="timeline-end">2003 CE</span>
+            </div>
+            <div id="timeline-markers"></div>
         </div>
-        
-        <div id="controls">
-            <h2>Axis Controls</h2>
-            <div class="axis-control">
-                <label for="x-axis">X Axis:</label>
-                <select id="x-axis">
-                    <option value="type" selected>Type</option>
-                    <option value="year">Year</option>
-                    <option value="region">Region</option>
-                </select>
-            </div>
-            <div class="axis-control">
-                <label for="y-axis">Y Axis:</label>
-                <select id="y-axis">
-                    <option value="region" selected>Region</option>
-                    <option value="year">Year</option>
-                    <option value="type">Type</option>
-                </select>
-            </div>
-            <div class="axis-control">
-                <label for="z-axis">Z Axis:</label>
-                <select id="z-axis">
-                    <option value="year" selected>Year</option>
-                    <option value="type">Type</option>
-                    <option value="region">Region</option>
-                </select>
-            </div>
-            <div class="axis-control">
-                <label for="background-toggle" style="display: flex; align-items: center; cursor: pointer;">
-                    <input type="checkbox" id="background-toggle" style="margin-right: 8px; cursor: pointer;">
-                    <span>White Background</span>
-                </label>
-            </div>
+
+        <div id="nav-button">
+            <a href="3d.html">
+                <span>🌐</span>
+                <span>3D View</span>
+            </a>
         </div>
 
         <div id="legend">
-            <h3>Color Scale (Type)</h3>
+            <h3>Artwork Types</h3>
             <div id="legend-content"></div>
         </div>
 
@@ -258,26 +247,34 @@
             <div id="tooltip-title"></div>
             <div id="tooltip-info"></div>
         </div>
-
-        <div id="axis-labels">
-            <div class="axis-label x-axis" id="x-axis-label">X Axis</div>
-            <div class="axis-label y-axis" id="y-axis-label">Y Axis</div>
-            <div class="axis-label z-axis" id="z-axis-label">Z Axis</div>
-        </div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- noUiSlider JS -->
+    <script src="https://cdn.jsdelivr.net/npm/nouislider@15.7.1/dist/nouislider.min.js"></script>
+
     <script>
         // Global variables
-        let scene, camera, renderer, controls;
+        let map;
         let artworks = [];
         let metadata = {};
-        let points = [];
-        let raycaster, mouse;
-        let currentAxes = { x: 'type', y: 'region', z: 'year' };
-        let hoveredPoint = null;
-        let isWhiteBackground = false;
+        let markers = [];
+        let markersLayer;
+        let currentYearRange = { min: -38000, max: 2003 };
+        let typeColors = {};
+
+        // Color palette for artwork types
+        const TYPE_COLORS = {
+            'architecture': '#FF6B6B',
+            'drawing': '#4ECDC4',
+            'installation': '#95E1D3',
+            'other': '#F38181',
+            'painting': '#AA96DA',
+            'sculpture': '#FCBAD3',
+            'textile': '#FFD93D'
+        };
 
         // Initialize
         async function init() {
@@ -288,584 +285,487 @@
 
             console.log(`Loaded ${artworks.length} artworks`);
 
-            // Setup scene
-            scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x1a1a1a);
+            // Initialize type colors
+            metadata.types.forEach(type => {
+                typeColors[type] = TYPE_COLORS[type] || '#CCCCCC';
+            });
 
-            // Setup camera
-            camera = new THREE.PerspectiveCamera(
-                75,
-                window.innerWidth / window.innerHeight,
-                0.1,
-                1000
-            );
-            // Position camera to look straight onto Y (up) and Z (to the right) axes
-            // Camera positioned along X axis, looking at origin
-            camera.position.set(-15, 10, 10);
-            camera.lookAt(0,0,0);
+            // Initialize map
+            map = L.map('map').setView([40, 10], 3); // Center on Europe/Mediterranean
 
-            // Setup renderer
-            renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            document.getElementById('canvas-container').appendChild(renderer.domElement);
+            // Add OpenStreetMap tiles
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 19
+            }).addTo(map);
 
-            // Setup controls
-            controls = new THREE.OrbitControls(camera, renderer.domElement);
-            controls.enableDamping = true;
-            controls.dampingFactor = 0.05;
+            // Create layer group for markers
+            markersLayer = L.layerGroup().addTo(map);
 
-            // Setup raycaster for mouse interaction
-            raycaster = new THREE.Raycaster();
-            mouse = new THREE.Vector2();
+            // Initialize timeline slider
+            initTimelineSlider();
 
-            // Setup event listeners
-            setupEventListeners();
+            // Create legend
+            createLegend();
 
-            // Create initial visualization
-            updateVisualization();
-
-            // Start animation loop
-            animate();
+            // Add all markers initially
+            updateMarkers();
         }
 
-        function setupEventListeners() {
-            // Initialize dropdowns to match default axes
-            document.getElementById('x-axis').value = currentAxes.x;
-            document.getElementById('y-axis').value = currentAxes.y;
-            document.getElementById('z-axis').value = currentAxes.z;
-            
-            // Axis dropdowns
-            document.getElementById('x-axis').addEventListener('change', (e) => {
-                currentAxes.x = e.target.value;
-                updateVisualization();
-            });
-            document.getElementById('y-axis').addEventListener('change', (e) => {
-                currentAxes.y = e.target.value;
-                updateVisualization();
-            });
-            document.getElementById('z-axis').addEventListener('change', (e) => {
-                currentAxes.z = e.target.value;
-                updateVisualization();
-            });
-
-            // Background toggle
-            document.getElementById('background-toggle').addEventListener('change', (e) => {
-                isWhiteBackground = e.target.checked;
-                toggleBackground();
-            });
-
-            // Mouse move for tooltip
-            renderer.domElement.addEventListener('mousemove', onMouseMove);
-            renderer.domElement.addEventListener('click', onMouseClick);
-
-            // Window resize
-            window.addEventListener('resize', onWindowResize);
-        }
-
-        function compressBceYear(yearValue, minBce, maxCe) {
-            // Compression scheme:
-            // -75000 BCE: 0.1
-            // -2000 BCE: 0.2
-            // 0: 0.3
-            // 0 to maxCe: 0.3 to 1.0 (70%)
-            
-            if (yearValue <= -2000) {
-                // -75000 to -2000 BCE: map to 0.1 to 0.2
-                const bceRange = Math.abs(minBce) - 2000; // Range from -75000 to -2000 = 73000
-                if (bceRange === 0) return 0.15;
-                // Map: -75000 (largest abs value) -> 0.1, -2000 (smallest abs value) -> 0.2
-                // Invert: larger abs values map to smaller normalized values
-                const absYear = Math.abs(yearValue);
-                const normalized = 0.1 + ((bceRange - (absYear - 2000)) / bceRange) * 0.1;
-                return normalized;
-            } else if (yearValue < 0) {
-                // -2000 to 0: map to 0.2 to 0.3
-                // Map: -2000 -> 0.2, 0 -> 0.3
-                const normalized = 0.2 + ((Math.abs(yearValue) / 2000) * 0.1);
-                return normalized;
+        // Timeline compression functions
+        // Compress: -75000 to -2000 (first 10%), -2000 to 0 (next 10%), 0 to 2000 (80% of remaining), 2000+ (compressed into last 2%)
+        function yearToSliderPosition(year, minYear, maxYear) {
+            if (year <= -2000) {
+                // minYear to -2000: map to 0-0.1
+                const range = -2000 - minYear;
+                if (range === 0) return 0.05;
+                const normalized = (year - minYear) / range;
+                return normalized * 0.1;
+            } else if (year < 0) {
+                // -2000 to 0: map to 0.1-0.2
+                const normalized = (year - (-2000)) / 2000;
+                return 0.1 + (normalized * 0.1);
+            } else if (year <= 2000) {
+                // 0 to 2000: map to 0.2-0.98 (78% of total, but we call it 80% of the "remaining" space)
+                const normalized = year / 2000;
+                return 0.2 + (normalized * 0.78);
             } else {
-                // 0 to maxCe: map to 0.3 to 1.0
-                const ceRange = maxCe;
-                if (ceRange === 0) return 0.3;
-                const normalized = 0.3 + ((yearValue / ceRange) * 0.7);
-                return normalized;
+                // 2000 to maxYear: compress into 0.98-1.0 (last 2%)
+                if (maxYear <= 2000) return 1.0;
+                const range = maxYear - 2000;
+                const normalized = (year - 2000) / range;
+                return 0.98 + (normalized * 0.02);
             }
         }
 
-        function getAxisValue(artwork, axisType) {
-            switch (axisType) {
-                case 'year':
-                    const yearValue = artwork.year.value;
-                    return compressBceYear(
-                        yearValue,
-                        metadata.year_range.min_bce,
-                        metadata.year_range.max_ce
-                    );
-                case 'type':
-                    return artwork.type.index / (metadata.type_count - 1 || 1);
-                case 'region':
-                    return artwork.region.index / (metadata.region_count - 1 || 1);
-                default:
-                    return 0;
-            }
-        }
-
-        function getAxisLabel(axisType) {
-            switch (axisType) {
-                case 'year':
-                    return 'Year';
-                case 'type':
-                    return 'Type';
-                case 'region':
-                    return 'Region';
-                default:
-                    return axisType;
-            }
-        }
-
-        function getColorForType(value) {
-            // Color scale for type (always used for coloring)
-            return new THREE.Color().setHSL(value * 0.8, 0.8, 0.5);
-        }
-
-        function getColorForZAxis(value, axisType) {
-            // Legacy function kept for legend compatibility
-            if (axisType === 'type') {
-                return getColorForType(value);
-            } else if (axisType === 'year') {
-                // Color scale for year (blue to red)
-                return new THREE.Color().setHSL(0.6 - (value * 0.6), 0.8, 0.5);
-            } else if (axisType === 'region') {
-                // Color scale for region
-                return new THREE.Color().setHSL(value * 0.6, 0.8, 0.5);
-            }
-            return new THREE.Color(0xffffff);
-        }
-
-        function updateVisualization() {
-            // Clear existing points
-            points.forEach(point => {
-                scene.remove(point);
-            });
-            points = [];
-
-            // Update axis labels
-            document.getElementById('x-axis-label').textContent = getAxisLabel(currentAxes.x);
-            document.getElementById('y-axis-label').textContent = getAxisLabel(currentAxes.y);
-            document.getElementById('z-axis-label').textContent = getAxisLabel(currentAxes.z);
-
-            // Update legend
-            updateLegend();
-
-            // Scale factor for visualization (increased for longer axes)
-            const scale = 10;
-            // Offset from origin to avoid label overlap
-            const originOffset = 1.5;
-
-            // Create points
-            artworks.forEach((artwork, index) => {
-                const x = originOffset + getAxisValue(artwork, currentAxes.x) * scale;
-                const y = originOffset + getAxisValue(artwork, currentAxes.y) * scale;
-                const z = originOffset + getAxisValue(artwork, currentAxes.z) * scale;
-
-                // Create sphere geometry
-                const geometry = new THREE.SphereGeometry(0.15, 16, 16);
-                // Always color by type, regardless of axis assignment
-                const typeValue = getAxisValue(artwork, 'type');
-                const color = getColorForType(typeValue);
-                const material = new THREE.MeshBasicMaterial({ color: color });
-                const sphere = new THREE.Mesh(geometry, material);
-
-                sphere.position.set(x, y, z);
-                sphere.userData = { artwork: artwork, index: index };
-
-                scene.add(sphere);
-                points.push(sphere);
-            });
-
-            // Add axes helpers
-            addAxesHelpers(scale);
-        }
-
-        function createTextSprite(text, fontSize = 48) {
-            // Calculate canvas size based on text length and font size
-            const padding = 20;
-            const tempCanvas = document.createElement('canvas');
-            const tempContext = tempCanvas.getContext('2d');
-            tempContext.font = `bold ${fontSize}px Arial`;
-            const textMetrics = tempContext.measureText(text);
-            const textWidth = textMetrics.width;
-            const textHeight = fontSize;
-            
-            const canvas = document.createElement('canvas');
-            const context = canvas.getContext('2d');
-            canvas.width = textWidth + padding * 2;
-            canvas.height = textHeight + padding * 2;
-            
-            // Match the scene background color
-            const bgColor = isWhiteBackground ? '#ffffff' : '#1a1a1a';
-            context.fillStyle = bgColor;
-            context.fillRect(0, 0, canvas.width, canvas.height);
-            
-            // Add a subtle border for better visibility
-            const borderColor = isWhiteBackground ? 'rgba(0, 0, 0, 0.3)' : 'rgba(255, 255, 255, 0.3)';
-            context.strokeStyle = borderColor;
-            context.lineWidth = 2;
-            context.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
-            
-            // Draw text with better rendering
-            context.font = `bold ${fontSize}px Arial`;
-            // Text color: black on white background, white on dark background
-            const textColor = isWhiteBackground ? '#000000' : '#ffffff';
-            context.fillStyle = textColor;
-            context.textAlign = 'center';
-            context.textBaseline = 'middle';
-            
-            // Add text shadow for better readability (adjust based on background)
-            if (isWhiteBackground) {
-                context.shadowColor = 'rgba(0, 0, 0, 0.5)';
+        function sliderPositionToYear(position, minYear, maxYear) {
+            if (position <= 0.1) {
+                // 0-0.1 maps to minYear to -2000
+                const range = -2000 - minYear;
+                const normalized = position / 0.1;
+                return minYear + (normalized * range);
+            } else if (position <= 0.2) {
+                // 0.1-0.2 maps to -2000 to 0
+                const normalized = (position - 0.1) / 0.1;
+                return -2000 + (normalized * 2000);
+            } else if (position <= 0.98) {
+                // 0.2-0.98 maps to 0 to 2000
+                const normalized = (position - 0.2) / 0.78;
+                return normalized * 2000;
             } else {
-                context.shadowColor = 'rgba(0, 0, 0, 0.8)';
+                // 0.98-1.0 maps to 2000 to maxYear
+                if (maxYear <= 2000) return 2000;
+                const range = maxYear - 2000;
+                const normalized = (position - 0.98) / 0.02;
+                return 2000 + (normalized * range);
             }
-            context.shadowBlur = 4;
-            context.shadowOffsetX = 2;
-            context.shadowOffsetY = 2;
-            
-            context.fillText(text, canvas.width / 2, canvas.height / 2);
-            
-            const texture = new THREE.CanvasTexture(canvas);
-            texture.needsUpdate = true;
-            const spriteMaterial = new THREE.SpriteMaterial({ 
-                map: texture,
-                transparent: true,
-                alphaTest: 0.1
-            });
-            const sprite = new THREE.Sprite(spriteMaterial);
-            
-            // Scale sprite to be larger and more readable
-            const scaleFactor = 0.8;
-            sprite.scale.set(scaleFactor * (canvas.width / 100), scaleFactor * (canvas.height / 100), 1);
-            
-            return sprite;
         }
 
-        function toggleBackground() {
-            // Update scene background
-            if (isWhiteBackground) {
-                scene.background = new THREE.Color(0xffffff);
-            } else {
-                scene.background = new THREE.Color(0x1a1a1a);
-            }
-            
-            // Recreate axes helpers with updated text sprites
-            const scale = 10;
-            addAxesHelpers(scale);
-        }
+        function initTimelineSlider() {
+            const minYear = metadata.year_range.min;
+            const maxYear = metadata.year_range.max;
 
-        function addAxesHelpers(scale) {
-            // Remove existing helpers
-            const existingHelpers = scene.children.filter(child => child.userData.isHelper);
-            existingHelpers.forEach(helper => scene.remove(helper));
+            currentYearRange = { min: minYear, max: maxYear };
 
-            // Offset from origin to avoid label overlap
-            const originOffset = 1.5;
-            const axisLength = scale * 1.3; // Longer axes
-
-            // X axis (red) - start from offset position
-            const xHelper = new THREE.ArrowHelper(
-                new THREE.Vector3(1, 0, 0),
-                new THREE.Vector3(originOffset, 0, 0),
-                axisLength,
-                0xff0000,
-                scale * 0.1,
-                scale * 0.05
-            );
-            xHelper.userData.isHelper = true;
-            scene.add(xHelper);
-
-            // Y axis (green) - start from offset position
-            const yHelper = new THREE.ArrowHelper(
-                new THREE.Vector3(0, 1, 0),
-                new THREE.Vector3(0, originOffset, 0),
-                axisLength,
-                0x00ff00,
-                scale * 0.1,
-                scale * 0.05
-            );
-            yHelper.userData.isHelper = true;
-            scene.add(yHelper);
-
-            // Z axis (blue) - start from offset position
-            const zHelper = new THREE.ArrowHelper(
-                new THREE.Vector3(0, 0, 1),
-                new THREE.Vector3(0, 0, originOffset),
-                axisLength,
-                0x0000ff,
-                scale * 0.1,
-                scale * 0.05
-            );
-            zHelper.userData.isHelper = true;
-            scene.add(zHelper);
-
-            // Add axis labels at the end of each axis (larger font)
-            const xLabel = createTextSprite(getAxisLabel(currentAxes.x), 36);
-            xLabel.position.set(originOffset + axisLength + 0.5, 0, 0);
-            xLabel.userData.isHelper = true;
-            scene.add(xLabel);
-
-            const yLabel = createTextSprite(getAxisLabel(currentAxes.y), 36);
-            yLabel.position.set(0, originOffset + axisLength + 0.5, 0);
-            yLabel.userData.isHelper = true;
-            scene.add(yLabel);
-
-            const zLabel = createTextSprite(getAxisLabel(currentAxes.z), 36);
-            zLabel.position.set(0, 0, originOffset + axisLength + 0.5);
-            zLabel.userData.isHelper = true;
-            scene.add(zLabel);
-
-            // Add tick marks and labels for categorical axes
-            addAxisTicks('x', currentAxes.x, scale);
-            addAxisTicks('y', currentAxes.y, scale);
-            addAxisTicks('z', currentAxes.z, scale);
-        }
-
-        function addAxisTicks(axisName, axisType, scale) {
-            const axisColors = { x: 0xff0000, y: 0x00ff00, z: 0x0000ff };
-            const axisColor = axisColors[axisName];
-            const axisColorHex = '#' + axisColor.toString(16).padStart(6, '0');
-            const originOffset = 1.5; // Match the offset used in addAxesHelpers
-
-            if (axisType === 'year') {
-                // Add year tick marks
-                const yearRange = metadata.year_range;
-                const minYear = yearRange.min_bce;
-                const maxYear = yearRange.max_ce;
-                
-                // Add ticks at key years: min BCE, 0, and some CE milestones
-                const tickYears = [];
-                if (minYear < 0) tickYears.push(minYear);
-                tickYears.push(0);
-                if (maxYear > 0) {
-                    const milestones = [500, 1000, 1500, 1800, 1900, 2000];
-                    milestones.forEach(year => {
-                        if (year <= maxYear) tickYears.push(year);
-                    });
+            // Create slider with compressed scale (0-1 range)
+            const slider = document.getElementById('timeline-slider');
+            noUiSlider.create(slider, {
+                start: [0, 1],
+                connect: true,
+                behaviour: 'drag', // Allow dragging the range (connect element)
+                range: {
+                    'min': 0,
+                    'max': 1
+                },
+                step: 0.001,
+                format: {
+                    to: function(value) {
+                        return value;
+                    },
+                    from: function(value) {
+                        return Number(value);
+                    }
                 }
+            });
 
-                // Filter out years that are too close together to avoid overlap
-                const minSpacing = 1.2; // Minimum spacing between labels in 3D units
-                const filteredYears = [];
-                const positions = [];
+            // Set initial positions
+            const startPos = yearToSliderPosition(minYear, minYear, maxYear);
+            const endPos = yearToSliderPosition(maxYear, minYear, maxYear);
+            slider.noUiSlider.set([startPos, endPos]);
+
+            // Create year markers at key positions
+            createTimelineMarkers(minYear, maxYear);
+            
+            // Create handle labels
+            updateHandleLabels(slider, minYear, maxYear);
+
+            // Update display values and filter markers on change
+            slider.noUiSlider.on('update', function(values, handle) {
+                const startPos = values[0];
+                const endPos = values[1];
                 
-                tickYears.forEach(year => {
-                    const normalized = compressBceYear(year, minYear, maxYear);
-                    const position = originOffset + normalized * scale;
-                    
-                    // Check if this position is too close to any existing label
-                    let tooClose = false;
-                    for (let i = 0; i < positions.length; i++) {
-                        if (Math.abs(position - positions[i]) < minSpacing) {
-                            tooClose = true;
-                            break;
-                        }
-                    }
-                    
-                    if (!tooClose) {
-                        filteredYears.push(year);
-                        positions.push(position);
-                    }
-                });
+                const startYear = Math.round(sliderPositionToYear(startPos, minYear, maxYear));
+                const endYear = Math.round(sliderPositionToYear(endPos, minYear, maxYear));
                 
-                filteredYears.forEach((year, index) => {
-                    const position = positions[index];
-                    
-                    // Create tick mark (below the axis)
-                    let tickPos, tickDir;
-                    if (axisName === 'x') {
-                        // X axis: tick below (negative Y)
-                        tickPos = new THREE.Vector3(position, originOffset - 0.3, 0);
-                        tickDir = new THREE.Vector3(0, -1, 0); // Point downward
-                    } else if (axisName === 'y') {
-                        // Y axis: tick to the left (negative X)
-                        tickPos = new THREE.Vector3(originOffset - 0.3, position, 0);
-                        tickDir = new THREE.Vector3(-1, 0, 0); // Point left
-                    } else {
-                        // Z axis: tick below (negative Y) - axis is at Y=0, so tick at Y=-0.3
-                        tickPos = new THREE.Vector3(0, -0.3, position);
-                        tickDir = new THREE.Vector3(0, -1, 0); // Point downward
-                    }
-                    
-                    const tick = new THREE.ArrowHelper(tickDir, tickPos, 0.2, axisColor, 0.1, 0.05);
-                    tick.userData.isHelper = true;
-                    scene.add(tick);
-                    
-                    // Add year label (below the axis, further from axis to avoid overlap)
-                    const yearLabel = createTextSprite(formatYear(year), 36);
-                    const labelOffset = -1.0; // Below the axis
-                    if (axisName === 'x') {
-                        yearLabel.position.set(position, labelOffset, 0);
-                    } else if (axisName === 'y') {
-                        yearLabel.position.set(labelOffset, position, 0);
-                    } else {
-                        yearLabel.position.set(0, labelOffset, position);
-                    }
-                    yearLabel.userData.isHelper = true;
-                    scene.add(yearLabel);
-                });
-            } else if (axisType === 'type') {
-                // Add type tick marks
-                const types = metadata.types;
-                types.forEach((type, index) => {
-                    const normalized = index / (types.length - 1 || 1);
-                    const position = originOffset + normalized * scale;
-                    
-                    // Create tick mark (below the axis)
-                    let tickPos, tickDir;
-                    if (axisName === 'x') {
-                        // X axis: tick below (negative Y) - axis is at Y=0, so tick at Y=-0.3
-                        tickPos = new THREE.Vector3(position, -0.3, 0);
-                        tickDir = new THREE.Vector3(0, -1, 0); // Point downward
-                    } else if (axisName === 'y') {
-                        // Y axis: tick to the left (negative X) - axis is at X=0, so tick at X=-0.3
-                        tickPos = new THREE.Vector3(-0.3, position, 0);
-                        tickDir = new THREE.Vector3(-1, 0, 0); // Point left
-                    } else {
-                        // Z axis: tick below (negative Y) - axis is at Y=0, so tick at Y=-0.3
-                        tickPos = new THREE.Vector3(0, -0.3, position);
-                        tickDir = new THREE.Vector3(0, -1, 0); // Point downward
-                    }
-                    
-                    const tick = new THREE.ArrowHelper(tickDir, tickPos, 0.2, axisColor, 0.1, 0.05);
-                    tick.userData.isHelper = true;
-                    scene.add(tick);
-                    
-                    // Add type label (below the axis)
-                    const labelText = type.length > 15 ? type.substring(0, 12) + '...' : type;
-                    const typeLabel = createTextSprite(labelText, 32);
-                    const labelOffset = -1.0; // Below the axis
-                    if (axisName === 'x') {
-                        typeLabel.position.set(position, labelOffset, 0);
-                    } else if (axisName === 'y') {
-                        typeLabel.position.set(labelOffset, position, 0);
-                    } else {
-                        typeLabel.position.set(0, labelOffset, position);
-                    }
-                    typeLabel.userData.isHelper = true;
-                    scene.add(typeLabel);
-                });
-            } else if (axisType === 'region') {
-                // Add region tick marks
-                const regions = metadata.regions;
-                regions.forEach((region, index) => {
-                    const normalized = index / (regions.length - 1 || 1);
-                    const position = originOffset + normalized * scale;
-                    
-                    // Create tick mark (below the axis)
-                    let tickPos, tickDir;
-                    if (axisName === 'x') {
-                        // X axis: tick below (negative Y) - axis is at Y=0, so tick at Y=-0.3
-                        tickPos = new THREE.Vector3(position, -0.3, 0);
-                        tickDir = new THREE.Vector3(0, -1, 0); // Point downward
-                    } else if (axisName === 'y') {
-                        // Y axis: tick to the left (negative X) - axis is at X=0, so tick at X=-0.3
-                        tickPos = new THREE.Vector3(-0.3, position, 0);
-                        tickDir = new THREE.Vector3(-1, 0, 0); // Point left
-                    } else {
-                        // Z axis: tick below (negative Y) - axis is at Y=0, so tick at Y=-0.3
-                        tickPos = new THREE.Vector3(0, -0.3, position);
-                        tickDir = new THREE.Vector3(0, -1, 0); // Point downward
-                    }
-                    
-                    const tick = new THREE.ArrowHelper(tickDir, tickPos, 0.2, axisColor, 0.1, 0.05);
-                    tick.userData.isHelper = true;
-                    scene.add(tick);
-                    
-                    // Add region label (below the axis)
-                    const labelText = region.length > 20 ? region.substring(0, 17) + '...' : region;
-                    const regionLabel = createTextSprite(labelText, 28);
-                    const labelOffset = -1.0; // Below the axis
-                    if (axisName === 'x') {
-                        regionLabel.position.set(position, labelOffset, 0);
-                    } else if (axisName === 'y') {
-                        regionLabel.position.set(labelOffset, position, 0);
-                    } else {
-                        regionLabel.position.set(0, labelOffset, position);
-                    }
-                    regionLabel.userData.isHelper = true;
-                    scene.add(regionLabel);
-                });
+                currentYearRange = { min: startYear, max: endYear };
+                
+                // Update display
+                document.getElementById('timeline-start').textContent = formatYear(startYear);
+                document.getElementById('timeline-end').textContent = formatYear(endYear);
+                
+                // Update handle labels
+                updateHandleLabels(slider, minYear, maxYear);
+                
+                // Update markers
+                updateMarkers();
+            });
+        }
+
+        function updateHandleLabels(slider, minYear, maxYear) {
+            const labelsContainer = document.getElementById('timeline-handle-labels');
+            const sliderElement = document.getElementById('timeline-slider');
+            
+            // Get current handle positions
+            const values = slider.noUiSlider.get();
+            const startPos = values[0];
+            const endPos = values[1];
+            
+            const startYear = Math.round(sliderPositionToYear(startPos, minYear, maxYear));
+            const endYear = Math.round(sliderPositionToYear(endPos, minYear, maxYear));
+            
+            // Get actual handle DOM elements to get their precise positions
+            const handles = sliderElement.querySelectorAll('.noUi-handle');
+            const sliderRect = sliderElement.getBoundingClientRect();
+            const labelsRect = labelsContainer.getBoundingClientRect();
+            
+            let startLeft, endLeft;
+            
+            if (handles.length >= 2) {
+                // Get actual pixel positions of handles relative to slider
+                const startHandleRect = handles[0].getBoundingClientRect();
+                const endHandleRect = handles[1].getBoundingClientRect();
+                
+                // Calculate position relative to labels container
+                startLeft = startHandleRect.left - labelsRect.left + (startHandleRect.width / 2);
+                endLeft = endHandleRect.left - labelsRect.left + (endHandleRect.width / 2);
+            } else {
+                // Fallback to percentage if handles not found
+                const startPercent = startPos * 100;
+                const endPercent = endPos * 100;
+                startLeft = (startPercent / 100) * labelsRect.width;
+                endLeft = (endPercent / 100) * labelsRect.width;
             }
+            
+            labelsContainer.innerHTML = `
+                <div class="timeline-handle-label" style="left: ${startLeft}px;">${formatYear(startYear)}</div>
+                <div class="timeline-handle-label" style="left: ${endLeft}px;">${formatYear(endYear)}</div>
+            `;
+        }
+
+        function createTimelineMarkers(minYear, maxYear) {
+            const markersContainer = document.getElementById('timeline-markers');
+            
+            // Years to mark: -2000, 0, 500, 1000, 1500, 1900
+            const markerYears = [-2000, 0, 500, 1000, 1500, 1900];
+            
+            // Clear existing markers
+            markersContainer.innerHTML = '';
+            
+            markerYears.forEach(year => {
+                // Only show markers that are within the overall range
+                if (year >= minYear && year <= maxYear) {
+                    const position = yearToSliderPosition(year, minYear, maxYear);
+                    const leftPercent = position * 100;
+                    
+                    const marker = document.createElement('div');
+                    marker.className = 'timeline-marker';
+                    marker.textContent = formatYear(year);
+                    marker.style.left = `${leftPercent}%`;
+                    
+                    markersContainer.appendChild(marker);
+                }
+            });
         }
 
         function formatYear(year) {
             if (year < 0) {
-                return `${Math.abs(year)} BCE`;
+                return `${Math.abs(year).toLocaleString()} BCE`;
             } else if (year === 0) {
                 return '0';
             } else {
-                return `${year} CE`;
+                return `${year.toLocaleString()} CE`;
             }
         }
 
-        function updateLegend() {
+        function createLegend() {
             const legendContent = document.getElementById('legend-content');
-            // Always show type colors in legend
-            const types = metadata.types;
-            let html = '<div style="margin-top: 5px;">';
-            types.forEach((type, i) => {
-                const color = getColorForType(i / (types.length - 1 || 1));
-                const hexColor = '#' + color.getHexString();
-                html += `<div style="color: ${hexColor}">● ${type}</div>`;
+            let html = '';
+            
+            // Sort types, but put 'other' at the end
+            const sortedTypes = [...metadata.types].sort((a, b) => {
+                if (a === 'other') return 1;
+                if (b === 'other') return -1;
+                return a.localeCompare(b);
             });
-            html += '</div>';
+            
+            sortedTypes.forEach(type => {
+                const color = typeColors[type];
+                html += `
+                    <div class="legend-item">
+                        <div class="legend-color" style="background-color: ${color};"></div>
+                        <span>${type}</span>
+                    </div>
+                `;
+            });
+            
             legendContent.innerHTML = html;
         }
 
-        function onMouseMove(event) {
-            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        function updateMarkers() {
+            // Clear existing markers
+            markersLayer.clearLayers();
+            markers = [];
 
-            raycaster.setFromCamera(mouse, camera);
-            const intersects = raycaster.intersectObjects(points);
+            // Filter artworks by year range
+            const filteredArtworks = artworks.filter(artwork => {
+                const yearValue = artwork.year.value;
+                return yearValue >= currentYearRange.min && yearValue <= currentYearRange.max;
+            });
 
-            const tooltip = document.getElementById('tooltip');
-
-            if (intersects.length > 0) {
-                const point = intersects[0].object;
-                const artwork = point.userData.artwork;
-
-                if (hoveredPoint !== point) {
-                    hoveredPoint = point;
-                    // Get the 3D position of the point
-                    const point3D = point.position.clone();
-                    showTooltip(artwork, point3D);
+            const artworksWithCoords = filteredArtworks.filter(a => {
+                // Check if coordinates exist and are valid
+                if (!a.coordinates || a.coordinates === null) {
+                    return false;
+                }
+                // Handle both object format {lat, lng} and array format [lat, lng]
+                let lat, lng;
+                if (Array.isArray(a.coordinates)) {
+                    lat = a.coordinates[0];
+                    lng = a.coordinates[1];
                 } else {
-                    // Update tooltip position as camera moves
-                    const point3D = point.position.clone();
-                    showTooltip(artwork, point3D);
+                    lat = a.coordinates.lat;
+                    lng = a.coordinates.lng;
                 }
-            } else {
-                if (hoveredPoint) {
-                    hoveredPoint = null;
-                    tooltip.style.display = 'none';
+                return typeof lat === 'number' && 
+                       typeof lng === 'number' &&
+                       !isNaN(lat) && 
+                       !isNaN(lng) &&
+                       lat >= -90 && lat <= 90 &&
+                       lng >= -180 && lng <= 180;
+            });
+            const artworksWithoutCoords = filteredArtworks.filter(a => {
+                if (!a.coordinates || a.coordinates === null) {
+                    return true;
                 }
+                let lat, lng;
+                if (Array.isArray(a.coordinates)) {
+                    lat = a.coordinates[0];
+                    lng = a.coordinates[1];
+                } else {
+                    lat = a.coordinates.lat;
+                    lng = a.coordinates.lng;
+                }
+                return !lat || !lng ||
+                       isNaN(lat) || 
+                       isNaN(lng) ||
+                       lat < -90 || lat > 90 ||
+                       lng < -180 || lng > 180;
+            });
+            
+            console.log(`Total artworks in range: ${filteredArtworks.length}`);
+            console.log(`Artworks with coordinates: ${artworksWithCoords.length}`);
+            console.log(`Artworks missing coordinates: ${artworksWithoutCoords.length}`);
+            
+            if (artworksWithoutCoords.length > 0) {
+                console.log(`Warning: ${artworksWithoutCoords.length} artworks in range but missing coordinates:`);
+                artworksWithoutCoords.forEach(a => {
+                    console.log(`  - ${a.title} by ${a.artist} (${a.year.display}) - Location: ${a.creation_location || 'N/A'}`);
+                });
             }
+
+            // Group artworks by coordinates to handle overlapping markers
+            const coordinateGroups = new Map();
+            artworksWithCoords.forEach(artwork => {
+                let lat, lng;
+                if (Array.isArray(artwork.coordinates)) {
+                    lat = artwork.coordinates[0];
+                    lng = artwork.coordinates[1];
+                } else {
+                    lat = artwork.coordinates.lat;
+                    lng = artwork.coordinates.lng;
+                }
+                
+                // Create a key from rounded coordinates (to group nearby markers)
+                // Round to 4 decimal places (~11 meters precision)
+                const key = `${lat.toFixed(4)},${lng.toFixed(4)}`;
+                
+                if (!coordinateGroups.has(key)) {
+                    coordinateGroups.set(key, []);
+                }
+                coordinateGroups.get(key).push({artwork, lat, lng});
+            });
+            
+            // Function to calculate pixel offset based on zoom level
+            function calculatePixelOffset(index, total, zoom) {
+                if (total === 1) {
+                    return {x: 0, y: 0};
+                }
+                
+                // Calculate angle for this marker (distribute evenly in a circle)
+                const angle = (2 * Math.PI * index) / total;
+                
+                // Base pixel radius scales with zoom: larger at lower zoom, smaller at higher zoom
+                // At zoom 1: ~100px radius, at zoom 18: ~10px radius
+                const basePixelRadius = Math.pow(1.3, zoom - 1) * 2;
+                // const basePixelRadius = 10;
+                const pixelRadius = basePixelRadius * (1 + Math.log(total) / 3);
+                
+                return {
+                    x: pixelRadius * Math.cos(angle),
+                    y: pixelRadius * Math.sin(angle)
+                };
+            }
+            
+            // Function to update marker positions based on current zoom
+            function updateMarkerPositions() {
+                const zoom = map.getZoom();
+                
+                // Group markers by their original coordinates
+                const markersByGroup = new Map();
+                markers.forEach(marker => {
+                    if (marker.groupKey && marker.groupSize > 1) {
+                        if (!markersByGroup.has(marker.groupKey)) {
+                            markersByGroup.set(marker.groupKey, []);
+                        }
+                        markersByGroup.get(marker.groupKey).push(marker);
+                    }
+                });
+                
+                // Update positions for each group
+                markersByGroup.forEach((groupMarkers, key) => {
+                    if (groupMarkers.length === 0) return;
+                    
+                    // Get base coordinates from first marker
+                    const baseMarker = groupMarkers[0];
+                    const baseLat = baseMarker.originalLat;
+                    const baseLng = baseMarker.originalLng;
+                    const basePoint = map.latLngToContainerPoint([baseLat, baseLng]);
+                    
+                    groupMarkers.forEach(marker => {
+                        // Calculate pixel offset
+                        const pixelOffset = calculatePixelOffset(
+                            marker.groupIndex, 
+                            marker.groupSize, 
+                            zoom
+                        );
+                        
+                        // Convert pixel offset back to lat/lng
+                        const offsetPoint = L.point(
+                            basePoint.x + pixelOffset.x,
+                            basePoint.y + pixelOffset.y
+                        );
+                        const offsetLatLng = map.containerPointToLatLng(offsetPoint);
+                        
+                        // Update marker position
+                        marker.setLatLng(offsetLatLng);
+                    });
+                });
+            }
+            
+            // Add markers for filtered artworks with offsets
+            coordinateGroups.forEach((group, key) => {
+                group.forEach((item, index) => {
+                    const {artwork, lat, lng} = item;
+                    const color = typeColors[artwork.type.name] || '#CCCCCC';
+                    
+                    // For initial placement, calculate offset using current zoom
+                    const zoom = map.getZoom();
+                    let markerLat = lat;
+                    let markerLng = lng;
+                    
+                    if (group.length > 1) {
+                        // Calculate pixel offset
+                        const basePoint = map.latLngToContainerPoint([lat, lng]);
+                        const pixelOffset = calculatePixelOffset(index, group.length, zoom);
+                        const offsetPoint = L.point(
+                            basePoint.x + pixelOffset.x,
+                            basePoint.y + pixelOffset.y
+                        );
+                        const offsetLatLng = map.containerPointToLatLng(offsetPoint);
+                        markerLat = offsetLatLng.lat;
+                        markerLng = offsetLatLng.lng;
+                    }
+                    
+                    // Create colored circle marker
+                    const marker = L.circleMarker(
+                        [markerLat, markerLng],
+                        {
+                            radius: 8,
+                            fillColor: color,
+                            color: '#fff',
+                            weight: 2,
+                            opacity: 1,
+                            fillOpacity: 0.8
+                        }
+                    );
+
+                    // Add hover tooltip
+                    marker.on('mouseover', function(e) {
+                        showTooltip(artwork, e.originalEvent);
+                    });
+
+                    marker.on('mouseout', function() {
+                        hideTooltip();
+                    });
+
+                    marker.on('mousemove', function(e) {
+                        updateTooltipPosition(e.originalEvent);
+                    });
+
+                    // Add click handler to open Wikipedia
+                    marker.on('click', function() {
+                        if (artwork.wikipedia_url) {
+                            window.open(artwork.wikipedia_url, '_blank');
+                        }
+                    });
+
+                    // Store artwork data and original coordinates in marker
+                    marker.artwork = artwork;
+                    marker.originalLat = lat;
+                    marker.originalLng = lng;
+                    marker.groupKey = key;
+                    marker.groupIndex = index;
+                    marker.groupSize = group.length;
+
+                    marker.addTo(markersLayer);
+                    markers.push(marker);
+                });
+            });
+            
+            // Update marker positions when zoom changes
+            map.on('zoomend', updateMarkerPositions);
+            map.on('moveend', updateMarkerPositions);
         }
 
-        function showTooltip(artwork, point3D) {
+        function showTooltip(artwork, event) {
             const tooltip = document.getElementById('tooltip');
             const tooltipImage = document.getElementById('tooltip-image');
             const tooltipTitle = document.getElementById('tooltip-title');
             const tooltipInfo = document.getElementById('tooltip-info');
 
             // Set image
-            tooltipImage.src = artwork.image_filename;
-            tooltipImage.onerror = function() {
-                this.style.display = 'none';
-            };
-            tooltipImage.onload = function() {
-                this.style.display = 'block';
-            };
+            if (artwork.image_filename) {
+                tooltipImage.src = artwork.image_filename;
+                tooltipImage.onerror = function() {
+                    this.style.display = 'none';
+                };
+                tooltipImage.onload = function() {
+                    this.style.display = 'block';
+                };
+                tooltipImage.style.display = 'block';
+            } else {
+                tooltipImage.style.display = 'none';
+            }
 
             // Set title
             tooltipTitle.textContent = artwork.title;
@@ -877,71 +777,45 @@
                 <div><strong>Type:</strong> ${artwork.type.name}</div>
                 <div><strong>Region:</strong> ${artwork.region.name}</div>
                 <div><strong>Medium:</strong> ${artwork.medium}</div>
+                ${artwork.creation_location ? `<div><strong>Location:</strong> ${artwork.creation_location}</div>` : ''}
             `;
 
-            // Project 3D point to screen coordinates
-            const vector = point3D.clone();
-            vector.project(camera);
-            
-            const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
-            const y = (vector.y * -0.5 + 0.5) * window.innerHeight;
-
-            // Position tooltip to the right of the point with small offset
+            // Show and position tooltip
             tooltip.style.display = 'block';
-            const tooltipWidth = 400;
-            const tooltipHeight = 500;
-            const offset = 30; // Small offset from point
-            let left = x + offset;
-            let top = y;
+            updateTooltipPosition(event);
+        }
 
-            // Adjust if off-screen
+        function updateTooltipPosition(event) {
+            const tooltip = document.getElementById('tooltip');
+            const offset = 15; // Fixed distance from mouse cursor
+            
+            // Always position to the right of the mouse with fixed offset
+            let left = event.clientX + offset;
+            let top = event.clientY + offset;
+
+            // Only adjust if it would go off-screen to the right
+            const tooltipWidth = 300;
             if (left + tooltipWidth > window.innerWidth) {
-                left = x - tooltipWidth - offset;
+                left = event.clientX - tooltipWidth - offset;
             }
+
+            // Only adjust if it would go off-screen at the bottom
+            const tooltipHeight = 400;
             if (top + tooltipHeight > window.innerHeight) {
-                top = window.innerHeight - tooltipHeight - 20;
+                top = event.clientY - tooltipHeight - offset;
             }
+
+            // Ensure it doesn't go off-screen at the top
             if (top < 0) {
-                top = 20;
+                top = offset;
             }
 
             tooltip.style.left = left + 'px';
             tooltip.style.top = top + 'px';
         }
 
-        function onMouseClick(event) {
-            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-
-            raycaster.setFromCamera(mouse, camera);
-            const intersects = raycaster.intersectObjects(points);
-
-            if (intersects.length > 0) {
-                const artwork = intersects[0].object.userData.artwork;
-                if (artwork.wikipedia_url) {
-                    window.open(artwork.wikipedia_url, '_blank');
-                }
-            }
-        }
-
-        function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        }
-
-        function animate() {
-            requestAnimationFrame(animate);
-            controls.update();
-            
-            // Update tooltip position if one is being shown
-            if (hoveredPoint) {
-                const artwork = hoveredPoint.userData.artwork;
-                const point3D = hoveredPoint.position.clone();
-                showTooltip(artwork, point3D);
-            }
-            
-            renderer.render(scene, camera);
+        function hideTooltip() {
+            document.getElementById('tooltip').style.display = 'none';
         }
 
         // Start the application
