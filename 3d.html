@@ -184,7 +184,7 @@
             }
 
             #legend {
-                bottom: 60px;
+                bottom: 110px;
                 right: 10px;
                 padding: 10px;
                 min-width: 150px;
@@ -994,22 +994,23 @@
             const tooltipHeight = isMobile ? 350 : 500;
             
             if (isMobile) {
-                // On mobile, position tooltip in bottom half of screen (with room for controls/legend)
-                const bottomSpace = 80; // Room for controls/legend
-                const topSpace = 10; // Small margin from top
-                const availableHeight = window.innerHeight - topSpace - bottomSpace;
-                
-                // Center horizontally, position in bottom half
-                let left = (window.innerWidth - tooltipWidth) / 2;
-                let top = topSpace + (availableHeight / 2); // Start in middle of available space
+                // On mobile, position tooltip with top-left corner at middle of screen (bottom half visible)
+                // Match map view positioning
+                let left = 10;
+                // Top-left corner at middle of screen
+                let top = window.innerHeight / 2;
                 
                 // Ensure it doesn't go off-screen
-                if (left < 10) left = 10;
                 if (left + tooltipWidth > window.innerWidth - 10) {
                     left = window.innerWidth - tooltipWidth - 10;
                 }
-                if (top + tooltipHeight > window.innerHeight - bottomSpace) {
-                    top = window.innerHeight - tooltipHeight - bottomSpace;
+                // If tooltip would go off bottom, move it up
+                if (top + tooltipHeight > window.innerHeight - 10) {
+                    top = window.innerHeight - tooltipHeight - 10;
+                }
+                // If tooltip would go off top, move it down
+                if (top < 10) {
+                    top = 10;
                 }
                 
                 tooltip.style.left = left + 'px';

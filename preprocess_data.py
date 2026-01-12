@@ -537,5 +537,5 @@ if __name__ == '__main__':
     # But for now, we always start from dataset_AI.json and merge coordinates
     
     data = preprocess_data(input_file, 'artwork_data_processed.json', geocode=geocode, geocoded_file=geocoded_file)
-    generate_standalone_html('artwork_3d_visualization.html', data, 'artwork_3d_visualization_standalone.html')
-    generate_map_standalone_html('artwork_map_visualization.html', data, 'artwork_map_visualization_standalone.html')
+    generate_standalone_html('artwork_3d_visualization.html', data, '3d.html')
+    generate_map_standalone_html('artwork_map_visualization.html', data, 'index.html')
