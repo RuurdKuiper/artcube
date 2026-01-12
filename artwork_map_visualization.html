@@ -577,7 +577,7 @@
                 
                 // Base pixel radius scales with zoom: larger at lower zoom, smaller at higher zoom
                 // At zoom 1: ~100px radius, at zoom 18: ~10px radius
-                const basePixelRadius = Math.pow(1.2, zoom - 1) * 2;
+                const basePixelRadius = Math.pow(1.3, zoom - 1) * 2;
                 // const basePixelRadius = 10;
                 const pixelRadius = basePixelRadius * (1 + Math.log(total) / 3);
                 

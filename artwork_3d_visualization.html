@@ -87,12 +87,12 @@
 
         #legend h3 {
             margin-bottom: 10px;
-            font-size: 14px;
+            font-size: 16px;
             color: #fff;
         }
 
         #legend-content {
-            font-size: 12px;
+            font-size: 14px;
             color: #ccc;
         }
 
@@ -112,9 +112,11 @@
         #tooltip-image {
             width: 100%;
             max-width: 300px;
+            max-height: 300px;
             height: auto;
             border-radius: 5px;
             margin-bottom: 10px;
+            object-fit: contain;
         }
 
         #tooltip-title {
@@ -177,31 +179,37 @@
             <div class="axis-control">
                 <label for="x-axis">X Axis:</label>
                 <select id="x-axis">
+                    <option value="type" selected>Type</option>
                     <option value="year">Year</option>
-                    <option value="type">Type</option>
                     <option value="region">Region</option>
                 </select>
             </div>
             <div class="axis-control">
                 <label for="y-axis">Y Axis:</label>
                 <select id="y-axis">
-                    <option value="type">Type</option>
+                    <option value="region" selected>Region</option>
                     <option value="year">Year</option>
-                    <option value="region">Region</option>
+                    <option value="type">Type</option>
                 </select>
             </div>
             <div class="axis-control">
                 <label for="z-axis">Z Axis:</label>
                 <select id="z-axis">
-                    <option value="region">Region</option>
-                    <option value="year">Year</option>
+                    <option value="year" selected>Year</option>
                     <option value="type">Type</option>
+                    <option value="region">Region</option>
                 </select>
+            </div>
+            <div class="axis-control">
+                <label for="background-toggle" style="display: flex; align-items: center; cursor: pointer;">
+                    <input type="checkbox" id="background-toggle" style="margin-right: 8px; cursor: pointer;">
+                    <span>White Background</span>
+                </label>
             </div>
         </div>
 
         <div id="legend">
-            <h3>Color Scale (Z-Axis)</h3>
+            <h3>Color Scale (Type)</h3>
             <div id="legend-content"></div>
         </div>
 
@@ -227,8 +235,9 @@
         let metadata = {};
         let points = [];
         let raycaster, mouse;
-        let currentAxes = { x: 'year', y: 'type', z: 'region' };
+        let currentAxes = { x: 'type', y: 'region', z: 'year' };
         let hoveredPoint = null;
+        let isWhiteBackground = false;
 
         // Initialize
         async function init() {
@@ -251,8 +260,10 @@
                 0.1,
                 1000
             );
-            camera.position.set(5, 5, 5);
-            camera.lookAt(0, 0, 0);
+            // Position camera to look straight onto Y (up) and Z (to the right) axes
+            // Camera positioned along X axis, looking at origin
+            camera.position.set(-15, 10, 10);
+            camera.lookAt(0,0,0);
 
             // Setup renderer
             renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -279,6 +290,11 @@
         }
 
         function setupEventListeners() {
+            // Initialize dropdowns to match default axes
+            document.getElementById('x-axis').value = currentAxes.x;
+            document.getElementById('y-axis').value = currentAxes.y;
+            document.getElementById('z-axis').value = currentAxes.z;
+            
             // Axis dropdowns
             document.getElementById('x-axis').addEventListener('change', (e) => {
                 currentAxes.x = e.target.value;
@@ -293,6 +309,12 @@
                 updateVisualization();
             });
 
+            // Background toggle
+            document.getElementById('background-toggle').addEventListener('change', (e) => {
+                isWhiteBackground = e.target.checked;
+                toggleBackground();
+            });
+
             // Mouse move for tooltip
             renderer.domElement.addEventListener('mousemove', onMouseMove);
             renderer.domElement.addEventListener('click', onMouseClick);
@@ -302,15 +324,31 @@
         }
 
         function compressBceYear(yearValue, minBce, maxCe) {
-            if (yearValue < 0) { // BCE
-                const bceRange = Math.abs(minBce);
-                if (bceRange === 0) return 0.05;
-                const normalized = (Math.abs(yearValue) / bceRange) * 0.1;
+            // Compression scheme:
+            // -75000 BCE: 0.1
+            // -2000 BCE: 0.2
+            // 0: 0.3
+            // 0 to maxCe: 0.3 to 1.0 (70%)
+            
+            if (yearValue <= -2000) {
+                // -75000 to -2000 BCE: map to 0.1 to 0.2
+                const bceRange = Math.abs(minBce) - 2000; // Range from -75000 to -2000 = 73000
+                if (bceRange === 0) return 0.15;
+                // Map: -75000 (largest abs value) -> 0.1, -2000 (smallest abs value) -> 0.2
+                // Invert: larger abs values map to smaller normalized values
+                const absYear = Math.abs(yearValue);
+                const normalized = 0.1 + ((bceRange - (absYear - 2000)) / bceRange) * 0.1;
                 return normalized;
-            } else { // CE
+            } else if (yearValue < 0) {
+                // -2000 to 0: map to 0.2 to 0.3
+                // Map: -2000 -> 0.2, 0 -> 0.3
+                const normalized = 0.2 + ((Math.abs(yearValue) / 2000) * 0.1);
+                return normalized;
+            } else {
+                // 0 to maxCe: map to 0.3 to 1.0
                 const ceRange = maxCe;
-                if (ceRange === 0) return 0.5;
-                const normalized = 0.1 + ((yearValue / ceRange) * 0.9);
+                if (ceRange === 0) return 0.3;
+                const normalized = 0.3 + ((yearValue / ceRange) * 0.7);
                 return normalized;
             }
         }
@@ -336,7 +374,7 @@
         function getAxisLabel(axisType) {
             switch (axisType) {
                 case 'year':
-                    return 'Year (BCE compressed to 10%)';
+                    return 'Year';
                 case 'type':
                     return 'Type';
                 case 'region':
@@ -346,13 +384,18 @@
             }
         }
 
+        function getColorForType(value) {
+            // Color scale for type (always used for coloring)
+            return new THREE.Color().setHSL(value * 0.8, 0.8, 0.5);
+        }
+
         function getColorForZAxis(value, axisType) {
-            if (axisType === 'year') {
+            // Legacy function kept for legend compatibility
+            if (axisType === 'type') {
+                return getColorForType(value);
+            } else if (axisType === 'year') {
                 // Color scale for year (blue to red)
                 return new THREE.Color().setHSL(0.6 - (value * 0.6), 0.8, 0.5);
-            } else if (axisType === 'type') {
-                // Color scale for type
-                return new THREE.Color().setHSL(value * 0.8, 0.8, 0.5);
             } else if (axisType === 'region') {
                 // Color scale for region
                 return new THREE.Color().setHSL(value * 0.6, 0.8, 0.5);
@@ -375,19 +418,22 @@
             // Update legend
             updateLegend();
 
-            // Scale factor for visualization
+            // Scale factor for visualization (increased for longer axes)
             const scale = 10;
+            // Offset from origin to avoid label overlap
+            const originOffset = 1.5;
 
             // Create points
             artworks.forEach((artwork, index) => {
-                const x = getAxisValue(artwork, currentAxes.x) * scale;
-                const y = getAxisValue(artwork, currentAxes.y) * scale;
-                const z = getAxisValue(artwork, currentAxes.z) * scale;
+                const x = originOffset + getAxisValue(artwork, currentAxes.x) * scale;
+                const y = originOffset + getAxisValue(artwork, currentAxes.y) * scale;
+                const z = originOffset + getAxisValue(artwork, currentAxes.z) * scale;
 
                 // Create sphere geometry
                 const geometry = new THREE.SphereGeometry(0.15, 16, 16);
-                const zValue = getAxisValue(artwork, currentAxes.z);
-                const color = getColorForZAxis(zValue, currentAxes.z);
+                // Always color by type, regardless of axis assignment
+                const typeValue = getAxisValue(artwork, 'type');
+                const color = getColorForType(typeValue);
                 const material = new THREE.MeshBasicMaterial({ color: color });
                 const sphere = new THREE.Mesh(geometry, material);
 
@@ -402,16 +448,95 @@
             addAxesHelpers(scale);
         }
 
+        function createTextSprite(text, fontSize = 48) {
+            // Calculate canvas size based on text length and font size
+            const padding = 20;
+            const tempCanvas = document.createElement('canvas');
+            const tempContext = tempCanvas.getContext('2d');
+            tempContext.font = `bold ${fontSize}px Arial`;
+            const textMetrics = tempContext.measureText(text);
+            const textWidth = textMetrics.width;
+            const textHeight = fontSize;
+            
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = textWidth + padding * 2;
+            canvas.height = textHeight + padding * 2;
+            
+            // Match the scene background color
+            const bgColor = isWhiteBackground ? '#ffffff' : '#1a1a1a';
+            context.fillStyle = bgColor;
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Add a subtle border for better visibility
+            const borderColor = isWhiteBackground ? 'rgba(0, 0, 0, 0.3)' : 'rgba(255, 255, 255, 0.3)';
+            context.strokeStyle = borderColor;
+            context.lineWidth = 2;
+            context.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+            
+            // Draw text with better rendering
+            context.font = `bold ${fontSize}px Arial`;
+            // Text color: black on white background, white on dark background
+            const textColor = isWhiteBackground ? '#000000' : '#ffffff';
+            context.fillStyle = textColor;
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            
+            // Add text shadow for better readability (adjust based on background)
+            if (isWhiteBackground) {
+                context.shadowColor = 'rgba(0, 0, 0, 0.5)';
+            } else {
+                context.shadowColor = 'rgba(0, 0, 0, 0.8)';
+            }
+            context.shadowBlur = 4;
+            context.shadowOffsetX = 2;
+            context.shadowOffsetY = 2;
+            
+            context.fillText(text, canvas.width / 2, canvas.height / 2);
+            
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.needsUpdate = true;
+            const spriteMaterial = new THREE.SpriteMaterial({ 
+                map: texture,
+                transparent: true,
+                alphaTest: 0.1
+            });
+            const sprite = new THREE.Sprite(spriteMaterial);
+            
+            // Scale sprite to be larger and more readable
+            const scaleFactor = 0.8;
+            sprite.scale.set(scaleFactor * (canvas.width / 100), scaleFactor * (canvas.height / 100), 1);
+            
+            return sprite;
+        }
+
+        function toggleBackground() {
+            // Update scene background
+            if (isWhiteBackground) {
+                scene.background = new THREE.Color(0xffffff);
+            } else {
+                scene.background = new THREE.Color(0x1a1a1a);
+            }
+            
+            // Recreate axes helpers with updated text sprites
+            const scale = 10;
+            addAxesHelpers(scale);
+        }
+
         function addAxesHelpers(scale) {
             // Remove existing helpers
             const existingHelpers = scene.children.filter(child => child.userData.isHelper);
             existingHelpers.forEach(helper => scene.remove(helper));
 
-            // X axis (red)
+            // Offset from origin to avoid label overlap
+            const originOffset = 1.5;
+            const axisLength = scale * 1.3; // Longer axes
+
+            // X axis (red) - start from offset position
             const xHelper = new THREE.ArrowHelper(
                 new THREE.Vector3(1, 0, 0),
-                new THREE.Vector3(0, 0, 0),
-                scale * 1.1,
+                new THREE.Vector3(originOffset, 0, 0),
+                axisLength,
                 0xff0000,
                 scale * 0.1,
                 scale * 0.05
@@ -419,11 +544,11 @@
             xHelper.userData.isHelper = true;
             scene.add(xHelper);
 
-            // Y axis (green)
+            // Y axis (green) - start from offset position
             const yHelper = new THREE.ArrowHelper(
                 new THREE.Vector3(0, 1, 0),
-                new THREE.Vector3(0, 0, 0),
-                scale * 1.1,
+                new THREE.Vector3(0, originOffset, 0),
+                axisLength,
                 0x00ff00,
                 scale * 0.1,
                 scale * 0.05
@@ -431,49 +556,230 @@
             yHelper.userData.isHelper = true;
             scene.add(yHelper);
 
-            // Z axis (blue)
+            // Z axis (blue) - start from offset position
             const zHelper = new THREE.ArrowHelper(
                 new THREE.Vector3(0, 0, 1),
-                new THREE.Vector3(0, 0, 0),
-                scale * 1.1,
+                new THREE.Vector3(0, 0, originOffset),
+                axisLength,
                 0x0000ff,
                 scale * 0.1,
                 scale * 0.05
             );
             zHelper.userData.isHelper = true;
             scene.add(zHelper);
+
+            // Add axis labels at the end of each axis (larger font)
+            const xLabel = createTextSprite(getAxisLabel(currentAxes.x), 36);
+            xLabel.position.set(originOffset + axisLength + 0.5, 0, 0);
+            xLabel.userData.isHelper = true;
+            scene.add(xLabel);
+
+            const yLabel = createTextSprite(getAxisLabel(currentAxes.y), 36);
+            yLabel.position.set(0, originOffset + axisLength + 0.5, 0);
+            yLabel.userData.isHelper = true;
+            scene.add(yLabel);
+
+            const zLabel = createTextSprite(getAxisLabel(currentAxes.z), 36);
+            zLabel.position.set(0, 0, originOffset + axisLength + 0.5);
+            zLabel.userData.isHelper = true;
+            scene.add(zLabel);
+
+            // Add tick marks and labels for categorical axes
+            addAxisTicks('x', currentAxes.x, scale);
+            addAxisTicks('y', currentAxes.y, scale);
+            addAxisTicks('z', currentAxes.z, scale);
+        }
+
+        function addAxisTicks(axisName, axisType, scale) {
+            const axisColors = { x: 0xff0000, y: 0x00ff00, z: 0x0000ff };
+            const axisColor = axisColors[axisName];
+            const axisColorHex = '#' + axisColor.toString(16).padStart(6, '0');
+            const originOffset = 1.5; // Match the offset used in addAxesHelpers
+
+            if (axisType === 'year') {
+                // Add year tick marks
+                const yearRange = metadata.year_range;
+                const minYear = yearRange.min_bce;
+                const maxYear = yearRange.max_ce;
+                
+                // Add ticks at key years: min BCE, 0, and some CE milestones
+                const tickYears = [];
+                if (minYear < 0) tickYears.push(minYear);
+                tickYears.push(0);
+                if (maxYear > 0) {
+                    const milestones = [500, 1000, 1500, 1800, 1900, 2000];
+                    milestones.forEach(year => {
+                        if (year <= maxYear) tickYears.push(year);
+                    });
+                }
+
+                // Filter out years that are too close together to avoid overlap
+                const minSpacing = 1.2; // Minimum spacing between labels in 3D units
+                const filteredYears = [];
+                const positions = [];
+                
+                tickYears.forEach(year => {
+                    const normalized = compressBceYear(year, minYear, maxYear);
+                    const position = originOffset + normalized * scale;
+                    
+                    // Check if this position is too close to any existing label
+                    let tooClose = false;
+                    for (let i = 0; i < positions.length; i++) {
+                        if (Math.abs(position - positions[i]) < minSpacing) {
+                            tooClose = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!tooClose) {
+                        filteredYears.push(year);
+                        positions.push(position);
+                    }
+                });
+                
+                filteredYears.forEach((year, index) => {
+                    const position = positions[index];
+                    
+                    // Create tick mark (below the axis)
+                    let tickPos, tickDir;
+                    if (axisName === 'x') {
+                        // X axis: tick below (negative Y)
+                        tickPos = new THREE.Vector3(position, originOffset - 0.3, 0);
+                        tickDir = new THREE.Vector3(0, -1, 0); // Point downward
+                    } else if (axisName === 'y') {
+                        // Y axis: tick to the left (negative X)
+                        tickPos = new THREE.Vector3(originOffset - 0.3, position, 0);
+                        tickDir = new THREE.Vector3(-1, 0, 0); // Point left
+                    } else {
+                        // Z axis: tick below (negative Y) - axis is at Y=0, so tick at Y=-0.3
+                        tickPos = new THREE.Vector3(0, -0.3, position);
+                        tickDir = new THREE.Vector3(0, -1, 0); // Point downward
+                    }
+                    
+                    const tick = new THREE.ArrowHelper(tickDir, tickPos, 0.2, axisColor, 0.1, 0.05);
+                    tick.userData.isHelper = true;
+                    scene.add(tick);
+                    
+                    // Add year label (below the axis, further from axis to avoid overlap)
+                    const yearLabel = createTextSprite(formatYear(year), 36);
+                    const labelOffset = -1.0; // Below the axis
+                    if (axisName === 'x') {
+                        yearLabel.position.set(position, labelOffset, 0);
+                    } else if (axisName === 'y') {
+                        yearLabel.position.set(labelOffset, position, 0);
+                    } else {
+                        yearLabel.position.set(0, labelOffset, position);
+                    }
+                    yearLabel.userData.isHelper = true;
+                    scene.add(yearLabel);
+                });
+            } else if (axisType === 'type') {
+                // Add type tick marks
+                const types = metadata.types;
+                types.forEach((type, index) => {
+                    const normalized = index / (types.length - 1 || 1);
+                    const position = originOffset + normalized * scale;
+                    
+                    // Create tick mark (below the axis)
+                    let tickPos, tickDir;
+                    if (axisName === 'x') {
+                        // X axis: tick below (negative Y) - axis is at Y=0, so tick at Y=-0.3
+                        tickPos = new THREE.Vector3(position, -0.3, 0);
+                        tickDir = new THREE.Vector3(0, -1, 0); // Point downward
+                    } else if (axisName === 'y') {
+                        // Y axis: tick to the left (negative X) - axis is at X=0, so tick at X=-0.3
+                        tickPos = new THREE.Vector3(-0.3, position, 0);
+                        tickDir = new THREE.Vector3(-1, 0, 0); // Point left
+                    } else {
+                        // Z axis: tick below (negative Y) - axis is at Y=0, so tick at Y=-0.3
+                        tickPos = new THREE.Vector3(0, -0.3, position);
+                        tickDir = new THREE.Vector3(0, -1, 0); // Point downward
+                    }
+                    
+                    const tick = new THREE.ArrowHelper(tickDir, tickPos, 0.2, axisColor, 0.1, 0.05);
+                    tick.userData.isHelper = true;
+                    scene.add(tick);
+                    
+                    // Add type label (below the axis)
+                    const labelText = type.length > 15 ? type.substring(0, 12) + '...' : type;
+                    const typeLabel = createTextSprite(labelText, 32);
+                    const labelOffset = -1.0; // Below the axis
+                    if (axisName === 'x') {
+                        typeLabel.position.set(position, labelOffset, 0);
+                    } else if (axisName === 'y') {
+                        typeLabel.position.set(labelOffset, position, 0);
+                    } else {
+                        typeLabel.position.set(0, labelOffset, position);
+                    }
+                    typeLabel.userData.isHelper = true;
+                    scene.add(typeLabel);
+                });
+            } else if (axisType === 'region') {
+                // Add region tick marks
+                const regions = metadata.regions;
+                regions.forEach((region, index) => {
+                    const normalized = index / (regions.length - 1 || 1);
+                    const position = originOffset + normalized * scale;
+                    
+                    // Create tick mark (below the axis)
+                    let tickPos, tickDir;
+                    if (axisName === 'x') {
+                        // X axis: tick below (negative Y) - axis is at Y=0, so tick at Y=-0.3
+                        tickPos = new THREE.Vector3(position, -0.3, 0);
+                        tickDir = new THREE.Vector3(0, -1, 0); // Point downward
+                    } else if (axisName === 'y') {
+                        // Y axis: tick to the left (negative X) - axis is at X=0, so tick at X=-0.3
+                        tickPos = new THREE.Vector3(-0.3, position, 0);
+                        tickDir = new THREE.Vector3(-1, 0, 0); // Point left
+                    } else {
+                        // Z axis: tick below (negative Y) - axis is at Y=0, so tick at Y=-0.3
+                        tickPos = new THREE.Vector3(0, -0.3, position);
+                        tickDir = new THREE.Vector3(0, -1, 0); // Point downward
+                    }
+                    
+                    const tick = new THREE.ArrowHelper(tickDir, tickPos, 0.2, axisColor, 0.1, 0.05);
+                    tick.userData.isHelper = true;
+                    scene.add(tick);
+                    
+                    // Add region label (below the axis)
+                    const labelText = region.length > 20 ? region.substring(0, 17) + '...' : region;
+                    const regionLabel = createTextSprite(labelText, 28);
+                    const labelOffset = -1.0; // Below the axis
+                    if (axisName === 'x') {
+                        regionLabel.position.set(position, labelOffset, 0);
+                    } else if (axisName === 'y') {
+                        regionLabel.position.set(labelOffset, position, 0);
+                    } else {
+                        regionLabel.position.set(0, labelOffset, position);
+                    }
+                    regionLabel.userData.isHelper = true;
+                    scene.add(regionLabel);
+                });
+            }
+        }
+
+        function formatYear(year) {
+            if (year < 0) {
+                return `${Math.abs(year)} BCE`;
+            } else if (year === 0) {
+                return '0';
+            } else {
+                return `${year} CE`;
+            }
         }
 
         function updateLegend() {
             const legendContent = document.getElementById('legend-content');
-            const zAxisType = currentAxes.z;
-
-            if (zAxisType === 'year') {
-                legendContent.innerHTML = `
-                    <div>Blue: BCE (compressed)</div>
-                    <div>Red: Modern CE</div>
-                `;
-            } else if (zAxisType === 'type') {
-                const types = metadata.types;
-                let html = '<div style="margin-top: 5px;">';
-                types.forEach((type, i) => {
-                    const color = getColorForZAxis(i / (types.length - 1 || 1), 'type');
-                    const hexColor = '#' + color.getHexString();
-                    html += `<div style="color: ${hexColor}">● ${type}</div>`;
-                });
-                html += '</div>';
-                legendContent.innerHTML = html;
-            } else if (zAxisType === 'region') {
-                const regions = metadata.regions;
-                let html = '<div style="margin-top: 5px;">';
-                regions.forEach((region, i) => {
-                    const color = getColorForZAxis(i / (regions.length - 1 || 1), 'region');
-                    const hexColor = '#' + color.getHexString();
-                    html += `<div style="color: ${hexColor}">● ${region}</div>`;
-                });
-                html += '</div>';
-                legendContent.innerHTML = html;
-            }
+            // Always show type colors in legend
+            const types = metadata.types;
+            let html = '<div style="margin-top: 5px;">';
+            types.forEach((type, i) => {
+                const color = getColorForType(i / (types.length - 1 || 1));
+                const hexColor = '#' + color.getHexString();
+                html += `<div style="color: ${hexColor}">● ${type}</div>`;
+            });
+            html += '</div>';
+            legendContent.innerHTML = html;
         }
 
         function onMouseMove(event) {
@@ -491,7 +797,13 @@
 
                 if (hoveredPoint !== point) {
                     hoveredPoint = point;
-                    showTooltip(artwork, event.clientX, event.clientY);
+                    // Get the 3D position of the point
+                    const point3D = point.position.clone();
+                    showTooltip(artwork, point3D);
+                } else {
+                    // Update tooltip position as camera moves
+                    const point3D = point.position.clone();
+                    showTooltip(artwork, point3D);
                 }
             } else {
                 if (hoveredPoint) {
@@ -501,7 +813,7 @@
             }
         }
 
-        function showTooltip(artwork, mouseX, mouseY) {
+        function showTooltip(artwork, point3D) {
             const tooltip = document.getElementById('tooltip');
             const tooltipImage = document.getElementById('tooltip-image');
             const tooltipTitle = document.getElementById('tooltip-title');
@@ -528,19 +840,30 @@
                 <div><strong>Medium:</strong> ${artwork.medium}</div>
             `;
 
-            // Position tooltip
+            // Project 3D point to screen coordinates
+            const vector = point3D.clone();
+            vector.project(camera);
+            
+            const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
+            const y = (vector.y * -0.5 + 0.5) * window.innerHeight;
+
+            // Position tooltip to the right of the point with small offset
             tooltip.style.display = 'block';
             const tooltipWidth = 400;
             const tooltipHeight = 500;
-            let left = mouseX + 20;
-            let top = mouseY + 20;
+            const offset = 30; // Small offset from point
+            let left = x + offset;
+            let top = y;
 
             // Adjust if off-screen
             if (left + tooltipWidth > window.innerWidth) {
-                left = mouseX - tooltipWidth - 20;
+                left = x - tooltipWidth - offset;
             }
             if (top + tooltipHeight > window.innerHeight) {
-                top = mouseY - tooltipHeight - 20;
+                top = window.innerHeight - tooltipHeight - 20;
+            }
+            if (top < 0) {
+                top = 20;
             }
 
             tooltip.style.left = left + 'px';
@@ -571,6 +894,14 @@
         function animate() {
             requestAnimationFrame(animate);
             controls.update();
+            
+            // Update tooltip position if one is being shown
+            if (hoveredPoint) {
+                const artwork = hoveredPoint.userData.artwork;
+                const point3D = hoveredPoint.position.clone();
+                showTooltip(artwork, point3D);
+            }
+            
             renderer.render(scene, camera);
         }
 
