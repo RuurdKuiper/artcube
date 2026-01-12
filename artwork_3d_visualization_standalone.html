@@ -29,39 +29,6 @@
             height: 100%;
         }
 
-        #nav-button {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            z-index: 101;
-            background: rgba(0, 0, 0, 0.9);
-            border: 2px solid #555;
-            border-radius: 10px;
-            padding: 12px 20px;
-            backdrop-filter: blur(10px);
-            transition: all 0.3s ease;
-        }
-
-        #nav-button:hover {
-            background: rgba(30, 30, 30, 0.95);
-            border-color: #777;
-            transform: translateY(-2px);
-        }
-
-        #nav-button a {
-            color: #fff;
-            text-decoration: none;
-            font-size: 16px;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        #nav-button a:hover {
-            color: #4a9eff;
-        }
-
         #controls {
             position: absolute;
             top: 20px;
@@ -206,13 +173,6 @@
 <body>
     <div id="container">
         <div id="canvas-container"></div>
-        
-        <div id="nav-button">
-            <a href="index.html">
-                <span>🗺️</span>
-                <span>Map View</span>
-            </a>
-        </div>
         
         <div id="controls">
             <h2>Axis Controls</h2>

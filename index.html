@@ -33,6 +33,12 @@
             flex-direction: column;
         }
 
+        @media (max-width: 768px) {
+            #container {
+                flex-direction: column-reverse;
+            }
+        }
+
         #map {
             flex: 1;
             width: 100%;
@@ -146,10 +152,104 @@
             margin-bottom: 10px;
             font-size: 14px;
             color: #fff;
+            cursor: pointer;
+            user-select: none;
         }
 
         #legend-content {
             font-size: 12px;
+        }
+
+        #legend.mobile-collapsed #legend-content {
+            display: none;
+        }
+
+        /* Mobile responsive styles */
+        @media (max-width: 768px) {
+            #nav-button {
+                top: 10px;
+                right: 10px;
+                padding: 8px 12px;
+                font-size: 14px;
+            }
+
+            #nav-button a {
+                font-size: 14px;
+            }
+
+            #legend {
+                top: 50px;
+                right: 10px;
+                padding: 10px;
+                min-width: 150px;
+                max-width: 45%;
+            }
+
+            #legend h3 {
+                font-size: 12px;
+                margin-bottom: 8px;
+                padding-bottom: 5px;
+                border-bottom: 1px solid #555;
+            }
+
+            #legend-content {
+                font-size: 10px;
+            }
+
+            .legend-item {
+                margin-bottom: 5px;
+            }
+
+            .legend-color {
+                width: 14px;
+                height: 14px;
+                margin-right: 6px;
+            }
+
+            #timeline-container {
+                order: -1;
+                padding: 10px;
+                border-top: none;
+                border-bottom: 2px solid #444;
+            }
+
+            #timeline-label {
+                font-size: 14px;
+                margin-bottom: 10px;
+            }
+
+            #timeline-slider {
+                max-width: 95%;
+            }
+
+            #timeline-values {
+                font-size: 12px;
+            }
+
+            .timeline-marker {
+                font-size: 11px;
+            }
+
+            .timeline-handle-label {
+                font-size: 12px;
+            }
+
+            #tooltip {
+                max-width: 250px;
+                padding: 10px;
+            }
+
+            #tooltip-image {
+                max-width: 120px;
+            }
+
+            #tooltip-title {
+                font-size: 14px;
+            }
+
+            #tooltip-info {
+                font-size: 11px;
+            }
         }
 
         .legend-item {
@@ -818,8 +918,30 @@
             document.getElementById('tooltip').style.display = 'none';
         }
 
+        // Mobile legend toggle functionality
+        function setupMobileLegendToggle() {
+            const legend = document.getElementById('legend');
+            const legendTitle = legend.querySelector('h3');
+            
+            if (window.innerWidth <= 768) {
+                legend.classList.add('mobile-collapsed');
+                legendTitle.style.cursor = 'pointer';
+                legendTitle.addEventListener('click', function() {
+                    legend.classList.toggle('mobile-collapsed');
+                });
+            } else {
+                legend.classList.remove('mobile-collapsed');
+            }
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', setupMobileLegendToggle);
+
         // Start the application
         init();
+        
+        // Setup mobile legend toggle after init
+        setupMobileLegendToggle();
     </script>
 </body>
 </html>
